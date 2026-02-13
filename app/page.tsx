@@ -4,9 +4,9 @@ import {
   WhatsappLoginIllustration,
   WhatsappSVGAlt,
 } from "@/components/icons/chats-icon";
-import Login from "@/components/auth/auth";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import Authentication from "@/components/auth";
 
 const IndexPage = () => {
   return (
@@ -43,7 +43,7 @@ const IndexPage = () => {
             </Button>
           </div>
         </div>
-        <Login />
+        <Authentication />
       </section>
     </>
   );

@@ -24,10 +24,17 @@ import { Badge } from "../ui/badge";
 import { usePathname } from "next/navigation";
 
 import { data } from "@/lib/utils";
+import { db } from "@/lib/indexdb";
+import { useLiveQuery } from "dexie-react-hooks";
+import { User } from "@/types";
 
 export const PrimarySidebar = () => {
   const pathname = usePathname();
   const { setOpen } = useSidebar();
+  const currentUser = useLiveQuery(
+    async () => await db.user.toCollection().first()
+  );
+
 
   return (
     <Sidebar
@@ -47,13 +54,6 @@ export const PrimarySidebar = () => {
                         hidden: false,
                       }}
                       onClick={() => {
-                        // const mail = data.mails.sort(() => Math.random() - 0.5);
-                        // setMails(
-                        //   mail.slice(
-                        //     0,
-                        //     Math.max(5, Math.floor(Math.random() * 10) + 1),
-                        //   ),
-                        // );
                         setOpen(true);
                       }}
                       className={cn(
@@ -70,15 +70,12 @@ export const PrimarySidebar = () => {
                               variant="default"
                               className={cn(
                                 "bg-accent-primary absolute right-0 bottom-6.5 border-background border-2 p-1 text-xs text-white",
-                                item.unread.status &&
-                                  item.unread.count > 0 &&
-                                  "w-8 h-5 bottom-6 left-5 p-2.5 pl-3",
+                                item.title == "Chats" && currentUser?.unread_messages && currentUser.unread_messages > 0 &&
+                                "w-8 h-5 bottom-6 left-5 p-2.5 pl-3",
                               )}
                             >
-                              {item.unread.status && item.unread.count > 0 ? (
-                                <div className="font-bold">{`${item.unread.count}+`}</div>
-                              ) : (
-                                ""
+                              {item.title == "Chats" && currentUser?.unread_messages && currentUser.unread_messages > 0 && (
+                                <div className="font-bold">{`${currentUser?.unread_messages}`}</div>
                               )}
                             </Badge>
                           )}
@@ -86,13 +83,13 @@ export const PrimarySidebar = () => {
                             style={
                               item.title === "Communities"
                                 ? {
-                                    width: "26px",
-                                    height: "26px",
-                                  }
+                                  width: "26px",
+                                  height: "26px",
+                                }
                                 : {
-                                    width: "24px",
-                                    height: "24px",
-                                  }
+                                  width: "24px",
+                                  height: "24px",
+                                }
                             }
                             isactive={pathname === item.url}
                           />
@@ -112,7 +109,7 @@ export const PrimarySidebar = () => {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser user={currentUser as User} />
       </SidebarFooter>
     </Sidebar>
   );

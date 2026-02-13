@@ -1,6 +1,8 @@
+import { AppSidebar } from "@/components/app-sidebar";
+import { PrimarySidebar } from "@/components/shared/primary-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import { AuthStoreProvider } from "@/lib/providers/auth-store-provider";
+import { SecondarySidebar } from "./secondary-sidebar";
 
 export default function RootLayout({
   children,
@@ -15,6 +17,10 @@ export default function RootLayout({
         } as React.CSSProperties
       }
     >
+      <AppSidebar>
+        <PrimarySidebar />
+        <SecondarySidebar />
+      </AppSidebar>
       {children}
       <Toaster />
     </SidebarProvider>

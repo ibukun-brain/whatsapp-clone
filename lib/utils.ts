@@ -12,6 +12,139 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Humanizes a date based on the following criteria:
+ * - If the date is today: show only the time (e.g., "01:30 AM")
+ * - If the date is yesterday: show "Yesterday"
+ * - Otherwise: show the date (e.g., "02/06/2026")
+ */
+export function humanizeDate(date: Date | string): string {
+  const inputDate = typeof date === "string" ? new Date(date) : date;
+  const now = new Date();
+
+  // Get start of today (midnight)
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  // Get start of yesterday (midnight)
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  // Check if the date is today
+  if (inputDate >= startOfToday) {
+    return inputDate.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // Check if the date is yesterday
+  if (inputDate >= startOfYesterday && inputDate < startOfToday) {
+    return "Yesterday";
+  }
+
+  // Otherwise, return the formatted date
+  return inputDate.toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
+/**
+ * Returns an object with `date` and `time` strings for a given datetime,
+ * formatted according to the user's timezone.
+ *
+ * @param datetime - The Date object or ISO string to format.
+ * @param userTimezone - An IANA timezone string (e.g., "Africa/Lagos", "America/New_York").
+ * @returns An object `{ date, time }` that can be destructured.
+ */
+export function getDateTimeByTimezone(
+  datetime: Date | string,
+  userTimezone: string
+): { date: string; time: string } {
+  const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+
+  const time = inputDate.toLocaleTimeString("en-US", {
+    timeZone: userTimezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).toLowerCase();
+
+  const date = inputDate.toLocaleDateString("en-US", {
+    timeZone: userTimezone,
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+
+  return { date, time };
+}
+
+/**
+ * Returns a WhatsApp-style date separator label for a given datetime.
+ *
+ * - Today → "TODAY"
+ * - Yesterday → "YESTERDAY"
+ * - Within the past week → day name, e.g. "MONDAY"
+ * - Older → formatted date, e.g. "02/06/2026"
+ *
+ * @param datetime  - The Date object or ISO string of the message.
+ * @param userTimezone - An IANA timezone string (e.g. "Africa/Lagos").
+ * @returns A date-only key string suitable for use as a separator label.
+ */
+export function getDateLabel(
+  datetime: Date | string,
+  userTimezone: string
+): string {
+  const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+
+  // Get the date parts in the user's timezone
+  const msgParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(inputDate);
+  const msgYear = Number(msgParts.find(p => p.type === "year")!.value);
+  const msgMonth = Number(msgParts.find(p => p.type === "month")!.value) - 1;
+  const msgDay = Number(msgParts.find(p => p.type === "day")!.value);
+
+  const nowParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const nowYear = Number(nowParts.find(p => p.type === "year")!.value);
+  const nowMonth = Number(nowParts.find(p => p.type === "month")!.value) - 1;
+  const nowDay = Number(nowParts.find(p => p.type === "day")!.value);
+
+  // Compare calendar dates (timezone-aware)
+  const msgDateOnly = new Date(msgYear, msgMonth, msgDay);
+  const nowDateOnly = new Date(nowYear, nowMonth, nowDay);
+  const diffDays = Math.floor(
+    (nowDateOnly.getTime() - msgDateOnly.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays === 0) return "TODAY";
+  if (diffDays === 1) return "YESTERDAY";
+  if (diffDays >= 2 && diffDays <= 6) {
+    return inputDate
+      .toLocaleDateString("en-US", { timeZone: userTimezone, weekday: "long" })
+      .toUpperCase();
+  }
+
+  // Older than a week – show formatted date
+  return inputDate.toLocaleDateString("en-US", {
+    timeZone: userTimezone,
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
 export const chatCategories = [
   {
     title: "All",
@@ -32,60 +165,35 @@ export const chatCategories = [
 ];
 
 export const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
   navMain: [
     {
       title: "Chats",
       url: "/chats",
       icon: ChatsIcon,
-      unread: {
-        status: true,
-        count: 99,
-      },
       isActive: true,
     },
     {
       title: "Status",
       url: "/status",
       icon: StatusIcon,
-      unread: {
-        status: true,
-        count: 0,
-      },
       isActive: false,
     },
     {
       title: "Channels",
       url: "/channels",
       icon: ChannelsIcon,
-      unread: {
-        status: true,
-        count: 0,
-      },
       isActive: false,
     },
     {
       title: "Communities",
       url: "/communites",
       icon: CommunitiesIcon,
-      unread: {
-        status: true,
-        count: 0,
-      },
       isActive: false,
     },
     {
       title: "Meta AI",
       url: "#",
       icon: MetaAI,
-      unread: {
-        status: true,
-        count: 0,
-      },
       isActive: false,
     },
   ],

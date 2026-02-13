@@ -5,8 +5,6 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { WhatsAppIllusration } from "@/components/icons/chats-icon";
-import { SecondarySidebar } from "@/app/(root)/chats/secondary-sidebar";
-import { PrimarySidebar } from "@/components/shared/primary-sidebar";
 
 export const metadata: Metadata = {
   title: "Chats",
@@ -15,11 +13,6 @@ export const metadata: Metadata = {
 export default function Page() {
   return (
     <>
-      <AppSidebar>
-        <PrimarySidebar />
-        <SecondarySidebar />
-      </AppSidebar>
-
       <SidebarInset>
         <div className="flex flex-col items-center justify-center h-screen">
           <div>

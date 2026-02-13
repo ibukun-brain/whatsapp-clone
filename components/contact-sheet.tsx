@@ -16,61 +16,20 @@ import {
   PhoneDialIcon,
   SearchIcon,
 } from "./icons/chats-icon";
+import { Contact } from "@/types";
 
 interface ContactSheetProps {
   open: boolean;
+  contacts?: Contact[];
+  currentUserid?: string;
   onOpenChange: (open: boolean) => void;
 }
 
-const contacts = [
-  {
-    letter: "#",
-    items: [
-      {
-        name: "+234 705 234 8679",
-        status: "Urgent calls only",
-        image: "https://github.com/shadcn.png",
-      }, // Placeholder
-      {
-        name: "0803 576 9458",
-        status: "Hey there! I am using WhatsApp.",
-        image: "https://github.com/shadcn.png",
-      },
-      { name: "0816 558 7088", status: "", image: "" },
-    ],
-  },
-  {
-    letter: "A",
-    items: [
-      {
-        name: "Aaish 💘",
-        status: "Kun fayakun.",
-        image: "https://github.com/shadcn.png",
-      },
-      {
-        name: "Aayobam Zuri",
-        status: "Hey there! I am using WhatsApp.",
-        image: "https://github.com/shadcn.png",
-      },
-      { name: "Abass CPE", status: "", image: "https://github.com/shadcn.png" },
-      {
-        name: "Abass MEE",
-        status: "Busy",
-        image: "https://github.com/shadcn.png",
-      },
-      {
-        name: "AbdHaleem EEE",
-        status: "The Dao (To be, not to seem)",
-        image: "https://github.com/shadcn.png",
-      },
-      { name: "Abdul WREE", status: "", image: "" },
-    ],
-  },
-];
-
-export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
+export function ContactSheet({ open, contacts, currentUserid, onOpenChange }: ContactSheetProps) {
   const [showPhoneDial, setShowPhoneDial] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const currentUserContact = contacts?.find(contact => contact.contact_user.id === currentUserid)
+  const userContacts = contacts?.filter(contact => contact.contact_user.id !== currentUserid)
 
   const handleDialPadClick = (value: string) => {
     setPhoneNumber((prev) => prev + value);
@@ -87,11 +46,11 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
         hideClose
         onInteractOutside={(e) => e.preventDefault()}
         className="bg-primary min-w-[561px] p-0 border-r-0 ml-[66px] shadow-none rounded-none h-full"
-        // Override overlay to be transparent and not block interaction with the first sidebar if possible,
-        // essentially acting like a panel.
-        // However, standard SheetOverlay blocks interaction.
-        // For this specific UI, we probably want the modal effect but only covering the right side.
-        // We can achieve "covering the second sidebar" by correct z-index and positioning.
+      // Override overlay to be transparent and not block interaction with the first sidebar if possible,
+      // essentially acting like a panel.
+      // However, standard SheetOverlay blocks interaction.
+      // For this specific UI, we probably want the modal effect but only covering the right side.
+      // We can achieve "covering the second sidebar" by correct z-index and positioning.
       >
         <div className="flex flex-col h-full bg-primary text-secondary-foreground">
           {/* Header */}
@@ -234,7 +193,7 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
                       variant="ghost"
                       className="w-full justify-start h-14 px-4 py-8 gap-4 hover:bg-background hover:text-foreground cursor-pointer"
                     >
-                      <div className="h-12 w-12 rounded-full bg-accent flex items-center justify-center text-primary">
+                      <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-primary">
                         <GroupAddIcon />
                       </div>
                       <span className="text-base font-normal">New group</span>
@@ -243,7 +202,7 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
                       variant="ghost"
                       className="w-full justify-start h-14 px-4 py-8 my-2 gap-4 hover:bg-background hover:text-foreground cursor-pointer"
                     >
-                      <div className="h-12 w-12 rounded-full bg-accent flex items-center justify-center text-primary">
+                      <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-primary">
                         <ContactAddIcon />
                       </div>
                       <div className="flex flex-col items-start">
@@ -256,7 +215,7 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
                       variant="ghost"
                       className="w-full justify-start h-14 px-4 py-8 gap-4 hover:bg-background hover:text-foreground cursor-pointer"
                     >
-                      <div className="h-12 w-12 rounded-full bg-accent flex items-center justify-center text-primary">
+                      <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-primary">
                         <CommunitiesIcon
                           style={{ width: "28px", height: "28px" }}
                           isactive={true}
@@ -272,20 +231,19 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
                   <div className="mt-4 px-4 text-sm text-muted-foreground font-medium mb-2">
                     Contacts on WhatsApp
                   </div>
+                  {/* Current User Contact details */}
                   <Button
                     variant="ghost"
-                    className="w-full justify-start h-16 px-4 gap-4 hover:bg-background hover:text-foreground cursor-pointer"
+                    className="w-full items-start justify-start h-16 px-4 gap-4 hover:bg-background hover:text-foreground cursor-pointer"
                   >
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src="/avatars/me.jpg" />
-                      <AvatarFallback>MA</AvatarFallback>
+                      <AvatarImage src={currentUserContact?.contact_user.profile_pic ?? undefined} />
+                      <AvatarFallback>{currentUserContact?.contact_name.slice(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col items-start gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-base">
-                          My Airtel (You)
+                        <span className="font-medium text-base leading-4">
+                          {currentUserContact?.contact_name} (You)
                         </span>
-                      </div>
                       <span className="text-xs text-muted-foreground">
                         Message yourself
                       </span>
@@ -293,35 +251,29 @@ export function ContactSheet({ open, onOpenChange }: ContactSheetProps) {
                   </Button>
 
                   {/* Contact Sections */}
-                  {contacts.map((section) => (
-                    <div key={section.letter} className="mt-4">
-                      <div className="px-4 text-sm text-muted-foreground font-medium mb-2">
-                        {section.letter}
-                      </div>
-                      {section.items.map((contact) => (
-                        <Button
-                          key={contact.name}
-                          variant="ghost"
-                          className="w-full justify-start h-16 px-4 gap-4 hover:bg-muted/30 hover:text-foreground cursor-pointer"
-                        >
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={contact.image} />
-                            <AvatarFallback>
-                              {contact.name.slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex flex-col items-start gap-0.5">
-                            <span className="font-medium text-base">
-                              {contact.name}
+                  {userContacts?.map((contact) => (
+                    <div key={contact.id} className="mt-1">
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start h-16 px-4 gap-4 hover:bg-muted/30 hover:text-foreground cursor-pointer"
+                      >
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={contact.contact_user.profile_pic ?? undefined} />
+                          <AvatarFallback>
+                            {contact.contact_name.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span className="font-medium text-base leading-4">
+                            {contact.contact_name}
+                          </span>
+                          {contact.contact_user.bio && (
+                            <span className="text-xs text-muted-foreground truncate max-w-[240px]">
+                              {contact.contact_user.bio}
                             </span>
-                            {contact.status && (
-                              <span className="text-xs text-muted-foreground truncate max-w-[240px]">
-                                {contact.status}
-                              </span>
-                            )}
-                          </div>
-                        </Button>
-                      ))}
+                          )}
+                        </div>
+                      </Button>
                     </div>
                   ))}
                 </div>

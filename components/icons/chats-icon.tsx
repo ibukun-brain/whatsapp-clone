@@ -1,4 +1,5 @@
 import Image from "next/image";
+import React from "react";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   style: object;
@@ -787,13 +788,19 @@ export const AddChannelIcon = (props: React.SVGProps<SVGSVGElement>) => {
 
 export const ProfileDefaultIcon = (props: React.SVGProps<SVGSVGElement>) => {
   return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <svg
+      viewBox="0 0 48 48"
+      height={212}
+      width={212}
+      fill="none"
+      {...props}
+    >
       <path
-        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2a7.2 7.2 0 01-6-3.22c.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08a7.2 7.2 0 01-6 3.22z"
-        fill="currentColor"
+        d="M24 23q-1.857 0-3.178-1.322Q19.5 20.357 19.5 18.5t1.322-3.178T24 14t3.178 1.322Q28.5 16.643 28.5 18.5t-1.322 3.178T24 23m-6.75 10q-.928 0-1.59-.66-.66-.662-.66-1.59v-.9q0-.956.492-1.758A3.3 3.3 0 0116.8 26.87a16.7 16.7 0 013.544-1.308q1.8-.435 3.656-.436 1.856 0 3.656.436T31.2 26.87q.816.422 1.308 1.223T33 29.85v.9q0 .928-.66 1.59-.662.66-1.59.66z"
+        fill="#606263"
       />
     </svg>
-  );
+  )
 };
 
 export const HelpIcon = (props: React.SVGProps<SVGSVGElement>) => {
@@ -930,3 +937,87 @@ export const SettingsAltIcon = (props: React.SVGProps<SVGSVGElement>) => {
     </svg>
   );
 };
+
+
+export const VideoCallIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const MicrophoneIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"
+        fill="currentColor"
+      />
+      <path
+        d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const EmojiIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M15.5 11c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const AttachmentPlusIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const PlayButtonIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M8 5v14l11-7L8 5z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+// NO message Acknowledgement
+export const CheckIcon1 = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 14 18"  {...props}>
+      <path
+        fill="currentColor"
+        d="M12.502 5.035l-.57-.444a.434.434 0 00-.609.076l-6.39 8.198a.38.38 0 01-.577.039l-2.614-2.556a.435.435 0 00-.614.007l-.505.516a.435.435 0 00.007.614l3.887 3.8a.38.38 0 00.577-.039l7.483-9.602a.435.435 0 00-.075-.609z"
+      />
+    </svg>
+  )
+}
+
+// Read or Delivered Message Acknowledgement
+export const CheckIcon2 = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 18 18" height={18} width={18}  {...props}>
+      <path
+        fill="currentColor"
+        d="M17.394 5.035l-.57-.444a.434.434 0 00-.609.076l-6.39 8.198a.38.38 0 01-.577.039l-.427-.388a.381.381 0 00-.578.038l-.451.576a.497.497 0 00.043.645l1.575 1.51a.38.38 0 00.577-.039l7.483-9.602a.436.436 0 00-.076-.609zm-4.892 0l-.57-.444a.434.434 0 00-.609.076l-6.39 8.198a.38.38 0 01-.577.039l-2.614-2.556a.435.435 0 00-.614.007l-.505.516a.435.435 0 00.007.614l3.887 3.8a.38.38 0 00.577-.039l7.483-9.602a.435.435 0 00-.075-.609z"
+      />
+    </svg>
+  )
+}
