@@ -22,8 +22,10 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
 import { getDateTimeByTimezone, getDateLabel } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageChats, DirectMessageName, User } from "@/types";
+import { DirectMessageChats, DirectMessageName, User, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults } from "@/types";
 import MessageBubble from "./message-bubble";
+import ContactInfo from "./contact-info";
+import { axiosInstance } from "@/lib/axios";
 
 
 
@@ -75,105 +77,197 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         [chatId]
     );
 
-    console.log(groupMessageChats, chatId)
+    const [isInfoOpen, setIsInfoOpen] = React.useState(false);
+    const [groupMembers, setGroupMembers] = React.useState<GroupMember[]>([])
+    const [groupInfo, setGroupInfo] = React.useState<GroupChatDetail>()
+    const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
 
-    if (!directMessage && !groupMessage) {
-        return <div>Chat not found</div>
-    }
+    React.useEffect(() => {
+        if (groupMessage && currentUser) {
+            const fetchGroupMembers = async () => {
+                let members = await db.groupmembers.where('groupchat_id').equals(chatId).toArray()
+                if (members.length > 0) {
+                    setGroupMembers(members.filter((member) => member.user?.id !== currentUser.id))
+                    setGroupInfo(members[0].groupchat)
+                } else {
+                    try {
+                        const groupMembersRes = await axiosInstance.get<GroupMemberResults>(`/groups/${chatId}/members`)
+
+                        if (groupMembersRes.data && groupMembersRes.data.results.length > 0) {
+                            await db.groupmembers.clear();
+                            await db.groupmembers.bulkPut(groupMembersRes.data.results);
+                            setGroupMembers(groupMembersRes.data.results.filter((member) => member.user?.id !== currentUser.id));
+                            setGroupInfo(groupMembersRes.data.results[0].groupchat)
+                        }
+
+                    } catch (error) {
+                        console.log("unable to fetch data")
+                    }
+
+                }
+            }
+            fetchGroupMembers()
+        }
+    }, [groupMessage, chatId, currentUser])
+
+    React.useEffect(() => {
+        if (directMessage && currentUser) {
+            const fetchDMGroupsInCommon = async () => {
+                let dmGroupsInCommon = await db.dmgroupincommon.where('direct_message_id').equals(chatId).toArray()
+                if (dmGroupsInCommon.length > 0) {
+                    setDmGroupsInCommon(dmGroupsInCommon)
+                } else {
+                    try {
+                        const dmGroupsInCommonRes = await axiosInstance.get<DMGroupsInCommonResults>(`/directmessages/${chatId}/groups-in-common/`)
+
+                        if (dmGroupsInCommonRes.data && dmGroupsInCommonRes.data.results.length > 0) {
+                            const groupsWithId = dmGroupsInCommonRes.data.results.map((group) => ({
+                                ...group,
+                                direct_message_id: chatId
+                            }))
+                            await db.dmgroupincommon.where('direct_message_id').equals(chatId).delete();
+                            await db.dmgroupincommon.bulkPut(groupsWithId);
+                            setDmGroupsInCommon(groupsWithId);
+                        }
+
+                    } catch (error) {
+                        console.log("unable to fetch data")
+                    }
+
+                }
+            }
+            fetchDMGroupsInCommon()
+        }
+    }, [directMessage, chatId, currentUser])
+
 
     return (
         <SidebarInset>
-            <div className="flex flex-col h-screen bg-[#efeae2]">
-                {/* ── Header ─────────────────────────────────────────── */}
-                <ChatHeader
-                    directMessageUserInfo={
-                        directMessage ? {
-                            name: directMessage.name as DirectMessageName ?? null,
-                            userId: directMessage.direct_message?.recent_user_id ?? null,
-                            image: directMessage.direct_message?.image ?? null
-                        } : null
-                    }
-                    groupMessageInfo={
-                        groupMessage ? {
-                            name: groupMessage.name as string ?? null,
-                            image: groupMessage.group_chat?.image ?? null
-                        } : null
-                    } />
+            <div className="flex bg-[#efeae2] h-screen overflow-hidden">
+                {/* ── Main Chat Section ───────────────────────────── */}
+                <div className="flex flex-col flex-1 border-r border-[#d1d7db]">
+                    {/* ── Header ─────────────────────────────────────────── */}
+                    <ChatHeader
+                        onOpenInfo={() => setIsInfoOpen(true)}
+                        directMessageUserInfo={
+                            directMessage ? {
+                                name: directMessage.name as DirectMessageName,
+                                userId: directMessage.direct_message?.recent_user_id as string,
+                                image: directMessage.direct_message?.image as string
+                            } : null
+                        }
+                        groupMessageInfo={
+                            groupMessage ? {
+                                groupId: chatId,
+                                name: groupMessage.name as string,
+                                image: groupMessage.group_chat?.image as string
+                            } : null
+                        }
+                        groupMembers={groupMembers}
+                    />
 
-                {/* ── Messages Area ───────────────────────────────────── */}
-                <div
-                    className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
-                >
-                    {/* direct message chats */}
-                    {currentUser && directMessageChats && directMessageChats.length > 0 && (() => {
-                        let lastDateLabel = "";
-                        return directMessageChats?.map((msg) => {
-                            const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                            const showSeparator = dateLabel !== lastDateLabel;
-                            if (showSeparator) lastDateLabel = dateLabel;
-                            return (
-                                <React.Fragment key={msg.id}>
-                                    {showSeparator && <DateSeparator label={dateLabel} />}
-                                    <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
-                                </React.Fragment>
-                            );
-                        });
-                    })()}
+                    {/* ── Messages Area ───────────────────────────────────── */}
+                    <div
+                        className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
+                    >
+                        {/* direct message chats */}
+                        {currentUser && directMessageChats && directMessageChats.length > 0 && (() => {
+                            let lastDateLabel = "";
+                            return directMessageChats?.map((msg) => {
+                                const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                const showSeparator = dateLabel !== lastDateLabel;
+                                if (showSeparator) lastDateLabel = dateLabel;
+                                return (
+                                    <React.Fragment key={msg.id}>
+                                        {showSeparator && <DateSeparator label={dateLabel} />}
+                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
+                                    </React.Fragment>
+                                );
+                            });
+                        })()}
 
-                    {/* group message chats */}
-                    {currentUser && groupMessageChats && groupMessageChats.length > 0 && (() => {
-                        let lastDateLabel = "";
-                        return groupMessageChats?.map((msg) => {
-                            const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                            const showSeparator = dateLabel !== lastDateLabel;
-                            if (showSeparator) lastDateLabel = dateLabel;
-                            return (
-                                <React.Fragment key={msg.id}>
-                                    {showSeparator && <DateSeparator label={dateLabel} />}
-                                    <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
-                                </React.Fragment>
-                            );
-                        });
-                    })()}
-                    {/* Bottom spacer */}
-                    <div className="h-2" />
-                </div>
-
-                {/* ── Input Bar ───────────────────────────────────────── */}
-                <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
-                    {/* Plus (attach) */}
-                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                        <AttachmentPlusIcon
-                            style={{ width: "24px", height: "24px" }}
-                            className="text-[#54656f]"
-                        />
-                    </button>
-
-                    {/* Emoji */}
-                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                        <EmojiIcon
-                            style={{ width: "24px", height: "24px" }}
-                            className="text-[#54656f]"
-                        />
-                    </button>
-
-                    {/* Text Input */}
-                    <div className="flex-1">
-                        <input
-                            type="text"
-                            placeholder="Type a message"
-                            className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
-                        />
+                        {/* group message chats */}
+                        {currentUser && groupMessageChats && groupMessageChats.length > 0 && (() => {
+                            let lastDateLabel = "";
+                            return groupMessageChats?.map((msg) => {
+                                const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                const showSeparator = dateLabel !== lastDateLabel;
+                                if (showSeparator) lastDateLabel = dateLabel;
+                                return (
+                                    <React.Fragment key={msg.id}>
+                                        {showSeparator && <DateSeparator label={dateLabel} />}
+                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
+                                    </React.Fragment>
+                                );
+                            });
+                        })()}
+                        {/* Bottom spacer */}
+                        <div className="h-2" />
                     </div>
 
-                    {/* Mic */}
-                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                        <MicrophoneIcon
-                            style={{ width: "24px", height: "24px" }}
-                            className="text-[#54656f]"
-                        />
-                    </button>
-                </footer>
+                    {/* ── Input Bar ───────────────────────────────────────── */}
+                    <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
+                        {/* Plus (attach) */}
+                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
+                            <AttachmentPlusIcon
+                                style={{ width: "24px", height: "24px" }}
+                                className="text-[#54656f]"
+                            />
+                        </button>
+
+                        {/* Emoji */}
+                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
+                            <EmojiIcon
+                                style={{ width: "24px", height: "24px" }}
+                                className="text-[#54656f]"
+                            />
+                        </button>
+
+                        {/* Text Input */}
+                        <div className="flex-1">
+                            <input
+                                type="text"
+                                placeholder="Type a message"
+                                className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
+                            />
+                        </div>
+
+                        {/* Mic */}
+                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
+                            <MicrophoneIcon
+                                style={{ width: "24px", height: "24px" }}
+                                className="text-[#54656f]"
+                            />
+                        </button>
+                    </footer>
+                </div>
+
+                {/* ── Side Info Panel ───────────────────────────── */}
+                {isInfoOpen && (
+                    <ContactInfo
+                        onClose={() => setIsInfoOpen(false)}
+                        directMessageUserInfo={
+                            directMessage && {
+                                name: directMessage.name as DirectMessageName,
+                                userId: directMessage.direct_message?.recent_user_id as string,
+                                image: directMessage.direct_message?.image as string,
+                                bio: directMessage.direct_message?.bio,
+                                phone: directMessage.direct_message?.phone,
+                                groupsInCommon: dmGroupsInCommon,
+                            }
+                        }
+                        groupMessageInfo={
+                            groupMessage && {
+                                groupId: chatId,
+                                groupchat: groupInfo,
+                                currentUser: currentUser,
+                                name: groupMessage.name as string,
+                                image: groupMessage.group_chat?.image as string
+                            }
+                        }
+                        groupMembers={groupMembers}
+                    />
+                )}
             </div>
         </SidebarInset>
     );

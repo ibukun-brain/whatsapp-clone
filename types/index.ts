@@ -4,6 +4,7 @@ export type User = {
   phone: string;
   profile_pic: string | null;
   timezone: string;
+  bio: string | null
   unread_messages: number
 }
 
@@ -28,6 +29,8 @@ export type UserState = {
 export type DirectMessage = {
   id: string;
   image: string | null;
+  bio?: string;
+  phone?: string;
   recent_user_id: string;
   delivered_date: Date | null;
   read_date: Date | null;
@@ -44,6 +47,21 @@ export type GroupChat = {
   recent_content: string;
   unread_messages: number;
   // Add other group chat properties as needed
+}
+
+export type GroupChatSettings = {
+  "send_new_message": boolean;
+  "approve_new_members": boolean;
+}
+
+export type GroupChatDetail = {
+  id: string;
+  name: string;
+  image: string | null;
+  created_at: Date | null;
+  bio?: string
+  settings: GroupChatSettings
+
 }
 
 export type DirectMessageName = {
@@ -85,6 +103,14 @@ export type DirectMessageChats = {
   timestamp: Date;
 }
 
+export type DMGroupsInCommon = Omit<GroupChat, "bio" | "created_at" | "settings"> & {
+  direct_message_id: string,
+  members_contact: string[]
+}
+
+export type DMGroupsInCommonResults = {
+  results: DMGroupsInCommon[]
+}
 export type DirectMessageChatsResults = {
   results: DirectMessageChats[]
 }
@@ -112,6 +138,21 @@ export type GroupMessageChats = {
 
 export type GroupMessageChatsResults = {
   results: GroupMessageChats[]
+}
+
+export type GroupMember = {
+  id: string;
+  groupchat_id: string;
+  groupchat: GroupChatDetail,
+  name: string; // name refers to the contact name saved by the user
+  user: User & {
+    direct_message_id: string
+  } | null;
+  role: "member" | "admin";
+}
+
+export type GroupMemberResults = {
+  results: GroupMember[]
 }
 
 

@@ -5,38 +5,49 @@ import { ChevronIcon, MenuIcon, SearchIcon, VideoCallIcon } from "@/components/i
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { db } from "@/lib/indexdb"
-import { DirectMessageName } from "@/types"
-import { useLiveQuery } from "dexie-react-hooks"
-import { group } from "console"
+import { DirectMessageName, GroupMember, GroupMemberResults } from "@/types"
+import { axiosInstance } from "@/lib/axios"
+import { cn } from "@/lib/utils"
 
 type DirectMessageUserInfo = {
-    name: DirectMessageName | null,
-    userId: string | null,
-    image: string | null
+    name: DirectMessageName,
+    userId: string,
+    image: string
 }
 
 type GroupMessageUserInfo = {
-    name: string | null,
-    image: string | null
+    groupId: string,
+    name: string,
+    image: string
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo }: { directMessageUserInfo: DirectMessageUserInfo | null, groupMessageInfo: GroupMessageUserInfo | null }) => {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers }: {
+    directMessageUserInfo: DirectMessageUserInfo | null,
+    groupMessageInfo: GroupMessageUserInfo | null,
+    onOpenInfo?: () => void,
+    groupMembers?: GroupMember[]
+}) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
+    const [showGroupHint, setShowGroupHint] = React.useState(true)
 
     React.useEffect(() => {
         const timer = setTimeout(() => setShowContactHint(false), 2000)
         return () => clearTimeout(timer)
     }, [])
 
-    // let getUserContact
-    // if (directMessageUserInfo) {
-    //     getUserContact = useLiveQuery(async () => {
-    //         return await db.contact.filter(contact => contact.contact_user.id === directMessageUserInfo?.userId).first()
-    //     }, [directMessageUserInfo?.userId])
-    // }
+    React.useEffect(() => {
+        const timer = setTimeout(() => setShowGroupHint(false), 2000)
+        return () => clearTimeout(timer)
+    }, [])
+
+    const groupMemberNames = (groupMembers ?? []).map(member => member.name).join(', ')
+
     return (
-        <header className="flex items-center justify-between px-4 py-[10px] bg-[#f0f2f5] border-l border-[#e9edef] z-10">
-            <div className="flex items-start gap-3">
+        <header
+            onClick={onOpenInfo}
+            className="flex items-center justify-between px-4 py-[10px] bg-white border-l z-10 cursor-pointer"
+        >
+            <div className={cn("flex items-start gap-3", !showContactHint && "items-center")}>
                 {directMessageUserInfo && groupMessageInfo === null && (
                     <>
                         <Avatar className="h-10 w-10">
@@ -66,7 +77,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo }: { directMessage
                                 {groupMessageInfo?.name}
                             </span>
                             <span className="text-[12px] font-normal text-[#54656f]">
-                                Online
+                                {showGroupHint ? 'Click here to view group info' : groupMemberNames || 'Loading members...'}
                             </span>
                         </div>
                     </>
@@ -115,7 +126,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo }: { directMessage
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-[200px]">
-                        <DropdownMenuItem>Contact info</DropdownMenuItem>
+                        <DropdownMenuItem onClick={onOpenInfo}>Contact info</DropdownMenuItem>
                         <DropdownMenuItem>Select messages</DropdownMenuItem>
                         <DropdownMenuItem>Close chat</DropdownMenuItem>
                         <DropdownMenuItem>Mute notifications</DropdownMenuItem>
@@ -131,3 +142,4 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo }: { directMessage
 }
 
 export default ChatHeader
+
