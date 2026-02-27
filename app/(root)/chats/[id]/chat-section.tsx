@@ -1,31 +1,23 @@
 "use client";
 
-import React from "react";
+import React, { useCallback, useRef } from "react";
+import useWebSocket from "react-use-websocket";
 import {
-    Avatar,
-    AvatarFallback,
-    AvatarImage,
-} from "@/components/ui/avatar";
-import {
-    VideoCallIcon,
-    SearchIcon,
-    MenuIcon,
-    CheckIcon2,
     MicrophoneIcon,
     EmojiIcon,
     AttachmentPlusIcon,
-    PlayButtonIcon,
-    ChevronIcon,
+
 } from "@/components/icons/chats-icon";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
-import { getDateTimeByTimezone, getDateLabel } from "@/lib/utils";
+import { getDateLabel } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageChats, DirectMessageName, User, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults } from "@/types";
+import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults } from "@/types";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
+import { useTypingStore } from "@/lib/stores/typing-store";
 
 
 
@@ -81,6 +73,66 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [groupMembers, setGroupMembers] = React.useState<GroupMember[]>([])
     const [groupInfo, setGroupInfo] = React.useState<GroupChatDetail>()
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
+
+    // ── WebSocket ────────────────────────────────────────────────────
+    const WS_URL = "ws://localhost:8000/ws/chats/";
+    const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
+        shouldReconnect: () => true,
+    });
+
+    const setTyping = useTypingStore((s) => s.setTyping);
+    const typingActive = useTypingStore((s) => s.typingChats[chatId] ?? false);
+    // Only show typing indicator for direct messages — group chat typing is not implemented
+    const isTyping = directMessage ? typingActive : false;
+
+    // Handle incoming WebSocket events from the backend
+    React.useEffect(() => {
+        if (!lastJsonMessage) return;
+        const msg = lastJsonMessage as { chatId?: string; isTyping?: boolean; userTypingId?: string };
+        console.log("[WS] Received event:", msg);
+        // Ignore our own typing events — the server broadcasts to everyone including the sender
+        console.log(msg.userTypingId, currentUser?.id)
+        if (msg.userTypingId && currentUser && msg.userTypingId === currentUser.id) return;
+        if (msg.chatId && typeof msg.isTyping === "boolean") {
+            setTyping(msg.chatId, msg.isTyping);
+        }
+    }, [lastJsonMessage, setTyping, currentUser]);
+
+    // Determine chat type based on which chat is active
+    const chatType = groupMessage ? "groupchat" : "directmessage";
+
+    // Debounce ref: clears and resets a timer on every keystroke
+    const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isTypingRef = useRef(false);
+
+    const handleTyping = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        // Only count actual alphabetical key presses
+        if (!/^[a-zA-Z]$/.test(e.key)) return;
+        if (!currentUser) return;
+
+        // Send isTyping: true immediately (only once per typing session)
+        if (!isTypingRef.current) {
+            isTypingRef.current = true;
+            sendJsonMessage({
+                chatType,
+                chatId,
+                userTypingId: currentUser.id,
+                isTyping: true,
+            });
+        }
+
+        // Reset the debounce timer — when it fires the user has stopped typing
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
+            isTypingRef.current = false;
+            sendJsonMessage({
+                chatType,
+                chatId,
+                userTypingId: currentUser.id,
+                isTyping: false,
+            });
+        }, 1500);
+    }, [currentUser, chatType, chatId, sendJsonMessage]);
 
     React.useEffect(() => {
         if (groupMessage && currentUser) {
@@ -149,11 +201,12 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     {/* ── Header ─────────────────────────────────────────── */}
                     <ChatHeader
                         onOpenInfo={() => setIsInfoOpen(true)}
+                        isTyping={isTyping}
                         directMessageUserInfo={
                             directMessage ? {
                                 name: directMessage.name as DirectMessageName,
                                 userId: directMessage.direct_message?.recent_user_id as string,
-                                image: directMessage.direct_message?.image as string
+                                image: directMessage.direct_message?.image as string,
                             } : null
                         }
                         groupMessageInfo={
@@ -229,6 +282,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 type="text"
                                 placeholder="Type a message"
                                 className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
+                                onKeyDown={handleTyping}
                             />
                         </div>
 

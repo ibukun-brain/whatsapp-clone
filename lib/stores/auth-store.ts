@@ -38,10 +38,12 @@ export const createAuthStore = (
         setAuth: (token: string) => {
           set({ isAuthenticated: true, accessToken: token });
           tokenManager.setToken(token);
+          document.cookie = `access_token=${token}; path=/; SameSite=Lax`;
         },
         logout: () => {
           set({ isAuthenticated: false, accessToken: null });
           tokenManager.setToken(null);
+          document.cookie = "access_token=; path=/; max-age=0";
           // Clear other stores on logout
           db.chatlist.clear();
           db.usersettings.clear();
@@ -52,10 +54,12 @@ export const createAuthStore = (
             const { data } = await axiosInstance.post("/auth/jwt/refresh/");
             set({ accessToken: data.access, isAuthenticated: true });
             tokenManager.setToken(data.access);
+            document.cookie = `access_token=${data.access}; path=/; SameSite=Lax`;
           } catch (error) {
             // If refresh fails, we are not authenticated
             set({ accessToken: null, isAuthenticated: false });
             tokenManager.setToken(null);
+            document.cookie = "access_token=; path=/; max-age=0";
           }
         },
       }),

@@ -65,18 +65,23 @@ export const PrimarySidebar = () => {
                     >
                       <Link href={item.url}>
                         <div>
-                          {item.title !== "Meta AI" && (
+                          {item.title !== "Meta AI" && item.title !== "Chats" && (
                             <Badge
                               variant="default"
                               className={cn(
                                 "bg-accent-primary absolute right-0 bottom-6.5 border-background border-2 p-1 text-xs text-white",
-                                item.title == "Chats" && currentUser?.unread_messages && currentUser.unread_messages > 0 &&
-                                "w-8 h-5 bottom-6 left-5 p-2.5 pl-3",
                               )}
                             >
-                              {item.title == "Chats" && currentUser?.unread_messages && currentUser.unread_messages > 0 && (
-                                <div className="font-bold">{`${currentUser?.unread_messages}`}</div>
+                            </Badge>
+                          )}
+                          {item.title === "Chats" && (currentUser?.unread_messages as number) > 0 && (
+                            <Badge
+                              variant="default"
+                              className={cn(
+                                "bg-accent-primary absolute border-background border-2 text-xs text-white font-bold w-8 h-5 bottom-6 left-5 p-2.5 pl-3",
                               )}
+                            >
+                              {currentUser?.unread_messages}
                             </Badge>
                           )}
                           <item.icon

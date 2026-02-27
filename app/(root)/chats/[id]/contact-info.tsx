@@ -353,13 +353,13 @@ const ContactInfo = ({ onClose, directMessageUserInfo, groupMessageInfo, groupMe
                         ) : (
                             <button className="flex items-center gap-4 px-8 py-4 hover:bg-[#f8f9fa] cursor-pointer transition-colors w-full text-left">
                                 <BlockIcon className="w-5 h-5 text-[#ea0038]" />
-                                <span className="text-[16px] text-[#ea0038]">Block {name}</span>
+                                <span className="text-[16px] text-[#ea0038]">Block {isDM ? (dmContactName || dmPhone) : groupName}</span>
                             </button>
                         )}
 
                         <button className="flex items-center gap-4 px-8 py-4 hover:bg-[#f8f9fa] cursor-pointer transition-colors w-full text-left">
                             <ReportIcon className="w-5 h-5 text-[#ea0038]" />
-                            <span className="text-[16px] text-[#ea0038]">Report {isGroup ? "group" : ""}</span>
+                            <span className="text-[16px] text-[#ea0038]">Report {isDM ? (dmContactName || dmPhone) : groupName}</span>
                         </button>
 
                         {!isGroup && (

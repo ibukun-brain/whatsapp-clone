@@ -26,6 +26,8 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
+import { useUserStore } from "@/lib/providers/user-store-provider";
+import { useShallow } from "zustand/react/shallow";
 
 const en = enLabels as Record<Country, string>;
 
@@ -40,7 +42,18 @@ const Signup = ({ login }: { login: () => void }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCheckingPhone, setIsCheckingPhone] = useState(false);
   const [phoneError, setPhoneError] = useState("");
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const { setAuth, accessToken } = useAuthStore(
+    useShallow((state) => ({
+      setAuth: state.setAuth,
+      accessToken: state.accessToken,
+    }))
+  );
+  const { setUser } = useUserStore(
+    useShallow((state) => ({
+      user: state.user,
+      setUser: state.setUser,
+    }))
+  );
 
   const signupMutation = useMutation({
     mutationFn: async () => {
@@ -68,7 +81,8 @@ const Signup = ({ login }: { login: () => void }) => {
     },
     onSuccess: (data) => {
       toast.success("Account created successfully with Passkey!");
-      setAuth(data.user, data.access);
+      setAuth(data.access);
+      setUser(data.user)
       setStep("profilePicture");
     },
     onError: (error: any) => {
@@ -89,6 +103,7 @@ const Signup = ({ login }: { login: () => void }) => {
       const { data } = await axiosInstance.patch("/users/me/", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
+          "Authorization": `Bearer ${accessToken}`
         }
       });
       return data;

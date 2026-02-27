@@ -57,6 +57,7 @@ import { useAuthStore } from "@/lib/providers/auth-store-provider";
 import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults } from "@/types";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
+import { useTypingStore } from "@/lib/stores/typing-store";
 
 export const SecondarySidebar = () => {
   const [contactSheetOpen, setContactSheetOpen] = React.useState(false);
@@ -76,6 +77,7 @@ export const SecondarySidebar = () => {
   const contacts = useLiveQuery(
     async () => await db.contact.toArray()
   );
+  const typingChats = useTypingStore((s) => s.typingChats);
   React.useEffect(() => {
     const fetchData = async () => {
       if (!isAuthenticated) return;
@@ -339,26 +341,40 @@ export const SecondarySidebar = () => {
                     </p>
                     <div className="max-w-[370px]">
                       <p className="truncate whitespace-nowrap">
-                        {chat.direct_message && chat.group_chat === null && (currentUser?.id === chat.direct_message.recent_user_id ? (
-                          <span className="inline-flex space-x-1">
-                            <span>
-                              {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date && !chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
-                            </span>
-                            <span>{chat.direct_message?.recent_content}</span>
-                          </span>
-                        )
-                          : (<span>{chat.direct_message?.recent_content}</span>)
-                        )}
-                        {chat.group_chat && chat.direct_message === null && (
-                          <>
-                            {chat.group_chat.recent_content && (
-                              <>
-                                {currentUser?.id === chat.group_chat.recent_user_id ? <span>You:{" "}</span> : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)}
-                                <span>{chat.group_chat.recent_content}</span>
-                              </>
-                            )}
-                          </>
-                        )}
+                        {(() => {
+                          const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
+                          if (chatItemId && typingChats[chatItemId]) {
+                            return (
+                              <span className="text-[#00a884] font-normal">
+                                Typing…
+                              </span>
+                            );
+                          }
+                          return (
+                            <>
+                              {chat.direct_message && chat.group_chat === null && (currentUser?.id === chat.direct_message.recent_user_id ? (
+                                <span className="inline-flex space-x-1">
+                                  <span>
+                                    {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date && !chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                  </span>
+                                  <span>{chat.direct_message?.recent_content}</span>
+                                </span>
+                              )
+                                : (<span>{chat.direct_message?.recent_content}</span>)
+                              )}
+                              {chat.group_chat && chat.direct_message === null && (
+                                <>
+                                  {chat.group_chat.recent_content && (
+                                    <>
+                                      {currentUser?.id === chat.group_chat.recent_user_id ? <span>You:{" "}</span> : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)}
+                                      <span>{chat.group_chat.recent_content}</span>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          );
+                        })()}
                       </p>
                     </div>
                   </div>

@@ -21,11 +21,12 @@ type GroupMessageUserInfo = {
     image: string
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers }: {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping }: {
     directMessageUserInfo: DirectMessageUserInfo | null,
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
-    groupMembers?: GroupMember[]
+    groupMembers?: GroupMember[],
+    isTyping?: boolean,
 }) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
     const [showGroupHint, setShowGroupHint] = React.useState(true)
@@ -58,7 +59,11 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                             <span className="text-[16px] font-normal text-[#111b21]">
                                 {directMessageUserInfo?.name?.contact_name}
                             </span>
-                            {showContactHint && (
+                            {isTyping ? (
+                                <span className="text-[12px] font-normal text-[#00a884]">
+                                    Typing…
+                                </span>
+                            ) : showContactHint && (
                                 <span className="text-[12px] font-normal text-[#54656f]">
                                     Click here for contact info
                                 </span>
@@ -77,7 +82,9 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                 {groupMessageInfo?.name}
                             </span>
                             <span className="text-[12px] font-normal text-[#54656f]">
-                                {showGroupHint ? 'Click here to view group info' : groupMemberNames || 'Loading members...'}
+                                {isTyping
+                                    ? <span className="text-[#00a884] animate-pulse">typing…</span>
+                                    : showGroupHint ? 'Click here to view group info' : groupMemberNames || 'Loading members...'}
                             </span>
                         </div>
                     </>
