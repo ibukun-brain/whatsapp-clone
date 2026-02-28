@@ -343,11 +343,13 @@ export const SecondarySidebar = () => {
                       <p className="truncate whitespace-nowrap">
                         {(() => {
                           const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
-                          if (chatItemId && typingChats[chatItemId]) {
+                          const typingList = chatItemId ? (typingChats[chatItemId] ?? []) : [];
+                          if (typingList.length > 0) {
+                            // Show the most recently added typer's avatar alongside "Typing…"
+                            const latestTyper = typingList[typingList.length - 1];
+                            const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id)
                             return (
-                              <span className="text-[#00a884] font-normal">
-                                Typing…
-                              </span>
+                              <span className="text-[#00a884] font-normal">{user?.contact_name || latestTyper.phone} is typing…</span>
                             );
                           }
                           return (

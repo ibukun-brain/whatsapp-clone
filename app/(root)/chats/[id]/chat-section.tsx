@@ -9,6 +9,7 @@ import {
 
 } from "@/components/icons/chats-icon";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
 import { getDateLabel } from "@/lib/utils";
@@ -17,7 +18,7 @@ import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DM
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
-import { useTypingStore } from "@/lib/stores/typing-store";
+import { useTypingStore, EMPTY_TYPING, userTypingType } from "@/lib/stores/typing-store";
 
 
 
@@ -54,6 +55,9 @@ const DateSeparator = ({ label }: { label: string }) => (
 
 // ─── Main Component ───────────────────────────────────────────────
 
+// Stable empty array — re-exported from the store to avoid per-render allocation
+const EMPTY_TYPING_SET = EMPTY_TYPING;
+
 const ChatSection = ({ chatId }: { chatId: string }) => {
     const directMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.direct_message?.id === chatId).first(), [chatId])
     const groupMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.group_chat?.id === chatId).first(), [chatId])
@@ -80,23 +84,42 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         shouldReconnect: () => true,
     });
 
-    const setTyping = useTypingStore((s) => s.setTyping);
-    const typingActive = useTypingStore((s) => s.typingChats[chatId] ?? false);
-    // Only show typing indicator for direct messages — group chat typing is not implemented
-    const isTyping = directMessage ? typingActive : false;
+    const setUserTyping = useTypingStore((s) => s.setUserTyping);
+    const setGroupTyping = useTypingStore((s) => s.setGroupTyping);
+    // Array of users currently typing in this chat.
+    // Falls back to the stable EMPTY_TYPING constant to avoid re-render loops.
+    const typingUsers = useTypingStore((s) => s.typingChats[chatId] ?? EMPTY_TYPING_SET);
 
-    // Handle incoming WebSocket events from the backend
+    // Handle incoming WebSocket typing events.
+    // Backend contract:
+    //   directmessage → userTypingId: string            (the typing user's ID)
+    //   groupchat     → userTyping:   userTypingType[]   (authoritative list of {id, image?})
     React.useEffect(() => {
         if (!lastJsonMessage) return;
-        const msg = lastJsonMessage as { chatId?: string; isTyping?: boolean; userTypingId?: string };
-        console.log("[WS] Received event:", msg);
-        // Ignore our own typing events — the server broadcasts to everyone including the sender
-        console.log(msg.userTypingId, currentUser?.id)
-        if (msg.userTypingId && currentUser && msg.userTypingId === currentUser.id) return;
-        if (msg.chatId && typeof msg.isTyping === "boolean") {
-            setTyping(msg.chatId, msg.isTyping);
+        console.log(lastJsonMessage);
+        const msg = lastJsonMessage as {
+            chatType?: string;
+            chatId?: string;
+            isTyping?: boolean;
+            userTypingId?: string;          // directmessage
+            userTyping?: userTypingType[];  // groupchat
+        };
+        if (!msg.chatId || typeof msg.isTyping !== "boolean") return;
+
+        if (msg.chatType === "groupchat" && msg.userTyping != null) {
+            // Replace entire list, filtering out ourselves
+            const withoutSelf = msg.userTyping.filter(
+                (u) => !(currentUser && u.id === currentUser.id)
+            );
+            setGroupTyping(msg.chatId, withoutSelf);
+        } else if (msg.chatType === "directmessage" && msg.userTypingId != null) {
+            if (currentUser && msg.userTypingId === currentUser.id) return; // skip own echo
+            setUserTyping(msg.chatId, msg.userTypingId, msg.isTyping);
         }
-    }, [lastJsonMessage, setTyping, currentUser]);
+    }, [lastJsonMessage, setUserTyping, setGroupTyping, currentUser]);
+
+    // DMs: any entry in the array means the other person is typing
+    const isTyping = directMessage ? typingUsers.length > 0 : false;
 
     // Determine chat type based on which chat is active
     const chatType = groupMessage ? "groupchat" : "directmessage";
@@ -257,6 +280,30 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* Bottom spacer */}
                         <div className="h-2" />
                     </div>
+
+                    {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
+                    {groupMessage && typingUsers.length > 0 && (
+                        <div className="flex items-end gap-1 px-4 pb-2">
+                            {/* Stacked mini avatars — up to 3 shown */}
+                            <AvatarGroup>
+                                {typingUsers.slice(0, 3).map((u) => (
+                                    <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
+                                        <AvatarImage src={u.image || undefined} />
+                                        <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
+                                            {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                ))}
+                            </AvatarGroup>
+
+                            {/* Typing bubble with three-dot bounce */}
+                            <div className="flex items-center gap-1 bg-white rounded-2xl rounded-tl-none px-3 py-2 shadow-sm">
+                                <span className="typing-dot typing-dot-1" />
+                                <span className="typing-dot typing-dot-2" />
+                                <span className="typing-dot typing-dot-3" />
+                            </div>
+                        </div>
+                    )}
 
                     {/* ── Input Bar ───────────────────────────────────────── */}
                     <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">

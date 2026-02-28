@@ -4,9 +4,7 @@ import React from "react"
 import { ChevronIcon, MenuIcon, SearchIcon, VideoCallIcon } from "@/components/icons/chats-icon"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { db } from "@/lib/indexdb"
 import { DirectMessageName, GroupMember, GroupMemberResults } from "@/types"
-import { axiosInstance } from "@/lib/axios"
 import { cn } from "@/lib/utils"
 
 type DirectMessageUserInfo = {
@@ -26,7 +24,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
     groupMembers?: GroupMember[],
-    isTyping?: boolean,
+isTyping?: boolean,
 }) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
     const [showGroupHint, setShowGroupHint] = React.useState(true)
@@ -82,9 +80,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                 {groupMessageInfo?.name}
                             </span>
                             <span className="text-[12px] font-normal text-[#54656f]">
-                                {isTyping
-                                    ? <span className="text-[#00a884] animate-pulse">typing…</span>
-                                    : showGroupHint ? 'Click here to view group info' : groupMemberNames || 'Loading members...'}
+                                {showGroupHint ? 'Click here to view group info' : groupMemberNames || 'Loading members...'}
                             </span>
                         </div>
                     </>

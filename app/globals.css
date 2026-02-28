@@ -68,6 +68,29 @@
   animation: progress-loading 2s linear infinite;
 }
 
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+.typing-dot {
+  display: block;
+  height: 7px;
+  width: 7px;
+  border-radius: 9999px;
+  background-color: #8696a0;
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+.typing-dot-1 { animation-delay: 0ms; }
+.typing-dot-2 { animation-delay: 200ms; }
+.typing-dot-3 { animation-delay: 400ms; }
+
 :root {
   --radius: 0.625rem;
   --background: #f7f5f3;
