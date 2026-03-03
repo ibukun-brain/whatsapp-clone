@@ -80,6 +80,16 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
     const [hasText, setHasText] = React.useState(false);
 
+    // ── Draft ─────────────────────────────────────────────────────────
+    // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
+    const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Mirror refs so the unmount cleanup can read the latest values synchronously.
+    const currentInputValueRef = useRef("");
+    const chatItemIdRef = useRef<string | undefined>(undefined);
+    // Tracks which chatId has already had its draft restored — prevents
+    // re-populating the input on every chatItem update (e.g. during typing saves).
+    const draftRestoredForRef = useRef<string | null>(null);
+
     // ── Scroll management ─────────────────────────────────────────────
     // Anchor div at the very bottom of the message list
     const bottomAnchorRef = useRef<HTMLDivElement>(null);
@@ -160,11 +170,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             },
         });
 
-        // Clear input and stop typing indicator
+        // Clear input, draft, and stop typing indicator
         if (inputRef.current) inputRef.current.value = "";
         setHasText(false);
         stopTyping();
-    }, [sendChatMessage, stopTyping]);
+
+        // Clear draft memory so it doesn't get saved back on unmount
+        currentInputValueRef.current = "";
+
+        // Clear draft from IndexedDB immediately on send
+        const activeChatItem = directMessage ?? groupMessage;
+        if (activeChatItem) db.chatlist.update(activeChatItem.id, { draft: null });
+    }, [sendChatMessage, stopTyping, directMessage, groupMessage]);
 
     const handleTyping = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
         // Send message on Enter
@@ -201,6 +218,74 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             });
         }, 1500);
     }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage]);
+
+    const chatItem = directMessage ?? groupMessage;
+
+    // ─── Draft: restore when entering a chat ─────────────────────────────────
+    // Depends on both chatId and chatItem so it retries once chatItem loads.
+    useEffect(() => {
+        if (!chatItem) return;
+
+        const itemSubId = chatItem.direct_message?.id || chatItem.group_chat?.id;
+        if (itemSubId !== chatId) return;
+
+        if (draftRestoredForRef.current === chatId) return;
+        draftRestoredForRef.current = chatId;
+
+        const savedDraft = chatItem.draft?.text ?? "";
+
+        if (inputRef.current) {
+            inputRef.current.value = savedDraft;
+            setHasText(savedDraft.length > 0);
+            currentInputValueRef.current = savedDraft;
+        }
+    }, [chatId, chatItem]);
+
+    // Keep mirror refs in sync with the latest chatItem metadata.
+    chatItemIdRef.current = chatItem?.id;
+
+    // ─── Draft: input change handler (debounced save to DB) ───────────────────
+    // ─── Draft: input change handler (debounced save to DB) ───────────────────
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const text = e.target.value;
+        currentInputValueRef.current = text;
+        setHasText(text.length > 0);
+
+        // Mark as sourced/dirty so the flush logic knows we have a value worth saving.
+        draftRestoredForRef.current = chatId;
+
+        if (!chatItem) return;
+        if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = setTimeout(() => {
+            db.chatlist.update(chatItem.id, {
+                draft: text ? { text, timestamp: new Date() } : null,
+            });
+        }, 500); // 500ms debounce
+    }, [chatItem, chatId]);
+
+    // ─── Draft: flush when leaving a chat (chatId change OR full unmount OR refresh) ────
+    useEffect(() => {
+        const flushDraft = () => {
+            if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+            const idToSave = chatItemIdRef.current;
+            const textToSave = currentInputValueRef.current;
+
+            if (idToSave && draftRestoredForRef.current === chatId) {
+                db.chatlist.update(idToSave, {
+                    draft: textToSave ? { text: textToSave, timestamp: new Date() } : null,
+                });
+            }
+        };
+
+        window.addEventListener("beforeunload", flushDraft);
+
+        return () => {
+            window.removeEventListener("beforeunload", flushDraft);
+            flushDraft();
+            currentInputValueRef.current = "";
+            draftRestoredForRef.current = null;
+        };
+    }, [chatId]);
 
     // ─── Scroll: always stay at the bottom ──────────────────────────────────
     const messages = directMessageChats ?? groupMessageChats;
@@ -381,7 +466,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 type="text"
                                 placeholder="Type a message"
                                 className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
-                                onChange={(e) => setHasText(e.target.value.length > 0)}
+                                onChange={handleInputChange}
                                 onKeyDown={handleTyping}
                             />
                         </div>

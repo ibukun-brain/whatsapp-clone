@@ -41,6 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { cn, humanizeDate } from "@/lib/utils";
 import { Button } from "../../../components/ui/button";
 import {
@@ -58,18 +59,100 @@ import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResu
 import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
 import { useTypingStore } from "@/lib/stores/typing-store";
+import { motion, AnimatePresence } from "framer-motion";
 
 export const SecondarySidebar = () => {
+  const hasFetched = React.useRef(false);
   const [contactSheetOpen, setContactSheetOpen] = React.useState(false);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [page, setPage] = React.useState(1);
   const pageSize = 25;
 
-  const hasFetched = React.useRef(false);
+  // Derive active chat id from the URL so we can suppress the Draft
+  // label while the user is still inside that chat.
+  const pathname = usePathname();
+  const activeChatId = pathname?.split("/chats/")[1] ?? null;
+
+  // Determine if the active chat was a draft when we entered it and its recency.
+  // This ensures the sorting stays "sticky" while you are working.
+  const [activeChatLatchedDraft, setActiveChatLatchedDraft] = React.useState(false);
+  const [activeChatLatchedTime, setActiveChatLatchedTime] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    if (activeChatId) {
+      db.chatlist.filter(c => (c.direct_message?.id === activeChatId || c.group_chat?.id === activeChatId))
+        .first()
+        .then(chat => {
+          if (chat) {
+            setActiveChatLatchedDraft(!!chat.draft?.text);
+            const msgTime = new Date(chat.timestamp).getTime();
+            const draftTime = chat.draft?.timestamp ? new Date(chat.draft.timestamp).getTime() : 0;
+            setActiveChatLatchedTime(Math.max(msgTime, draftTime));
+          }
+        });
+    } else {
+      setActiveChatLatchedDraft(false);
+      setActiveChatLatchedTime(null);
+    }
+  }, [activeChatId]);
 
   const chatlist = useLiveQuery(
-    () => db.chatlist.orderBy("timestamp").reverse().limit(page * pageSize).toArray(),
-    [page]
+    async () => {
+      // 1. Fetch all chats that have a draft (ensures they jump to top even if old)
+      const draftChats = await db.chatlist.filter(c => !!c.draft?.text).toArray();
+      const draftIds = new Set(draftChats.map(c => c.id));
+
+      // 2. Fetch the recent chats (limit-based)
+      const recentChats = await db.chatlist
+        .orderBy("timestamp")
+        .reverse()
+        .limit(page * pageSize)
+        .toArray();
+
+      // 3. Merge and deduplicate
+      const combined = [...draftChats];
+      for (const chat of recentChats) {
+        if (!draftIds.has(chat.id)) {
+          combined.push(chat);
+        }
+      }
+
+      // 4. Multi-level sort: Pinned > Drafts > Recency
+      return combined.sort((a, b) => {
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+
+        const idA = a.direct_message?.id || a.group_chat?.id;
+        const idB = b.direct_message?.id || b.group_chat?.id;
+
+        // Draft Priority Logic (Locked while active)
+        const hasDraftA = (idA === activeChatId) ? activeChatLatchedDraft : !!a.draft?.text;
+        const hasDraftB = (idB === activeChatId) ? activeChatLatchedDraft : !!b.draft?.text;
+
+        if (hasDraftA !== hasDraftB) return hasDraftA ? -1 : 1;
+
+        // Recency Logic (Locked while active)
+        let timeA: number;
+        if (idA === activeChatId && activeChatLatchedTime !== null) {
+          timeA = activeChatLatchedTime;
+        } else {
+          const msgTime = new Date(a.timestamp).getTime();
+          const draftTime = a.draft?.timestamp ? new Date(a.draft.timestamp).getTime() : 0;
+          timeA = Math.max(msgTime, draftTime);
+        }
+
+        let timeB: number;
+        if (idB === activeChatId && activeChatLatchedTime !== null) {
+          timeB = activeChatLatchedTime;
+        } else {
+          const msgTime = new Date(b.timestamp).getTime();
+          const draftTime = b.draft?.timestamp ? new Date(b.draft.timestamp).getTime() : 0;
+          timeB = Math.max(msgTime, draftTime);
+        }
+
+        return timeB - timeA;
+      });
+    },
+    [page, activeChatId, activeChatLatchedDraft, activeChatLatchedTime]
   );
   const currentUser = useLiveQuery(
     async () => await db.user.toCollection().first()
@@ -106,26 +189,31 @@ export const SecondarySidebar = () => {
         }
 
         // Store DirectMessages Chats
-        // Clear existing data and use bulkPut to ensure fresh data
         if (DirectMessagesChatRes.data.results.length > 0 && Array.isArray(DirectMessagesChatRes.data.results)) {
-          await db.directmessagechats.clear();
           await db.directmessagechats.bulkPut(DirectMessagesChatRes.data.results);
         }
 
         // Store GroupMessages Chats
-        // Clear existing data and use bulkPut to ensure fresh data
         if (GroupMessagesChatRes.data.results.length > 0 && Array.isArray(GroupMessagesChatRes.data.results)) {
-          await db.groupmessagechats.clear();
           await db.groupmessagechats.bulkPut(GroupMessagesChatRes.data.results);
         }
 
 
 
-        // Store Chat List
-        // Clear existing data and use bulkPut to ensure fresh data
+        // Store Chat List - Non-destructive merge to preserve local metadata (drafts, pins)
         if (chatsRes.data.results.length > 0 && Array.isArray(chatsRes.data.results)) {
-          await db.chatlist.clear();
-          await db.chatlist.bulkPut(chatsRes.data.results);
+          const existingChats = await db.chatlist.toArray();
+          const mergedChats = chatsRes.data.results.map((remoteChat: any) => {
+            const localChat = existingChats.find((c) => c.id === remoteChat.id);
+            return {
+              ...localChat,
+              ...remoteChat,
+              // Preserve local fields if they exist
+              draft: localChat?.draft || null,
+              isPinned: localChat?.isPinned || false,
+            };
+          });
+          await db.chatlist.bulkPut(mergedChats);
         }
 
 
@@ -321,92 +409,121 @@ export const SecondarySidebar = () => {
       <SidebarContent>
         <SidebarGroup className="px-3">
           <SidebarGroupContent>
-            {chatlist?.map((chat) => (
-              <Link
-                href={`/chats/${chat.direct_message?.id || chat.group_chat?.id}`}
-                key={chat.id}
-                className="group hover:bg-background-secondary hover:text-sidebar-accent-foreground hover:rounded-lg flex flex-col items-start gap-2 p-3 text-sm leading-tight whitespace-nowrap last:border-b-0"
-              >
-                <div className="flex w-full gap-3">
-                  <div>
-                    <Avatar className="h-[49px] w-[49px] border">
-                      <AvatarImage src={chat.group_chat?.image ?? chat.direct_message?.image ?? undefined} />
-                      {/* TODO: use a better icon for fallback */}
-                      <AvatarFallback>MA</AvatarFallback>
-                    </Avatar>
-                  </div>
-                  <div>
-                    <p className="text-secondary-foreground text-base">
-                      {typeof chat.name === "string" ? chat.name : (chat.name?.contact_name || chat.name?.display_name)}
-                    </p>
-                    <div className="max-w-[370px]">
-                      <p className="truncate whitespace-nowrap">
-                        {(() => {
-                          const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
-                          const typingList = chatItemId ? (typingChats[chatItemId] ?? []) : [];
-                          if (typingList.length > 0) {
-                            // Show the most recently added typer's avatar alongside "Typing…"
-                            const latestTyper = typingList[typingList.length - 1];
-                            const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id)
-                            return (
-                              <span className="text-[#00a884] font-normal">{user?.contact_name || latestTyper.phone} is typing…</span>
-                            );
-                          }
-                          return (
-                            <>
-                              {chat.direct_message && chat.group_chat === null && (currentUser?.id === chat.direct_message.recent_user_id ? (
-                                <span className="inline-flex space-x-1">
-                                  <span>
-                                    {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date && !chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+            <AnimatePresence mode="popLayout">
+              {chatlist?.map((chat) => (
+                <motion.div
+                  key={chat.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{
+                    layout: { duration: 0.4, type: "spring", bounce: 0.2 },
+                    opacity: { duration: 0.2 }
+                  }}
+                >
+                  <Link
+                    href={`/chats/${chat.direct_message?.id || chat.group_chat?.id}`}
+                    key={chat.id}
+                    className="group hover:bg-background-secondary hover:text-sidebar-accent-foreground hover:rounded-lg flex flex-col items-start gap-2 p-3 text-sm leading-tight whitespace-nowrap last:border-b-0"
+                  >
+                    <div className="flex w-full gap-3">
+                      <div>
+                        <Avatar className="h-[49px] w-[49px] border">
+                          <AvatarImage src={chat.group_chat?.image ?? chat.direct_message?.image ?? undefined} />
+                          {/* TODO: use a better icon for fallback */}
+                          <AvatarFallback>MA</AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <div>
+                        <p className="text-secondary-foreground text-base">
+                          {typeof chat.name === "string" ? chat.name : (chat.name?.contact_name || chat.name?.display_name)}
+                        </p>
+                        <div className="max-w-[370px]">
+                          <p className="truncate whitespace-nowrap">
+                            {(() => {
+                              const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
+                              const typingList = chatItemId ? (typingChats[chatItemId] ?? []) : [];
+
+                              // ── Typing indicator (highest priority) ──────────────────
+                              if (typingList.length > 0) {
+                                const latestTyper = typingList[typingList.length - 1];
+                                const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id);
+                                return (
+                                  <>
+                                    {chat.group_chat ? <span className="text-[#00a884] font-normal">{typingList.length > 1 ? `${typingList.length} people typing` : user?.contact_name || latestTyper.phone} is typing</span> : <span className="text-[#00a884] font-normal">Typing</span>}
+
+                                  </>);
+                              }
+
+                              // ── Draft indicator (second priority) ────────────────────
+                              if (chat.draft?.text && chatItemId !== activeChatId) {
+                                return (
+                                  <span className="inline-flex gap-1 items-baseline">
+                                    <span className="text-[#1daa61] font-medium shrink-0">Draft:</span>
+                                    <span className="truncate text-muted-foreground">{chat.draft.text}</span>
                                   </span>
-                                  <span>{chat.direct_message?.recent_content}</span>
-                                </span>
-                              )
-                                : (<span>{chat.direct_message?.recent_content}</span>)
-                              )}
-                              {chat.group_chat && chat.direct_message === null && (
+                                );
+                              }
+
+                              // ── Normal recent content ─────────────────────────────────
+                              return (
                                 <>
-                                  {chat.group_chat.recent_content && (
+                                  {chat.direct_message && chat.group_chat === null && (currentUser?.id === chat.direct_message.recent_user_id ? (
+                                    <span className="inline-flex space-x-1">
+                                      <span>
+                                        {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date && !chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                      </span>
+                                      <span>{chat.direct_message?.recent_content}</span>
+                                    </span>
+                                  )
+                                    : (<span>{chat.direct_message?.recent_content}</span>)
+                                  )}
+                                  {chat.group_chat && chat.direct_message === null && (
                                     <>
-                                      {currentUser?.id === chat.group_chat.recent_user_id ? <span>You:{" "}</span> : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)}
-                                      <span>{chat.group_chat.recent_content}</span>
+                                      {chat.group_chat.recent_content && (
+                                        <>
+                                          {currentUser?.id === chat.group_chat.recent_user_id ? <span>You:{" "}</span> : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)}
+                                          <span>{chat.group_chat.recent_content}</span>
+                                        </>
+                                      )}
                                     </>
                                   )}
                                 </>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="ml-auto text-xs">
-                    <p>{humanizeDate(chat.timestamp)}</p>
-                    <div className="flex justify-end mt-2 space-x-3">
-                      {chat?.isPinned && <PinIcon />}
-                      {chat?.direct_message && (
-                        <span>
-                          {chat.direct_message.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.direct_message.unread_messages}</Badge>}
-                        </span>
+                              );
+                            })()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="ml-auto text-xs">
+                        <p>{humanizeDate(chat.timestamp)}</p>
+                        <div className="flex justify-end mt-2 space-x-3">
+                          {chat?.isPinned && <PinIcon />}
+                          {chat?.direct_message && (
+                            <span>
+                              {chat.direct_message.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.direct_message.unread_messages}</Badge>}
+                            </span>
 
-                      )}
-                      {
-                        chat?.group_chat && (
-                          <span>
-                            {chat.group_chat?.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat.unread_messages}</Badge>}
-                          </span>
-                        )}
-                      <div className="hidden group-hover:flex">
-                        <ChevronIcon className="opacity-0 transition-opacity ease-in-out duration-200 group-hover:opacity-100" />
+                          )}
+                          {
+                            chat?.group_chat && (
+                              <span>
+                                {chat.group_chat?.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat.unread_messages}</Badge>}
+                              </span>
+                            )}
+                          <div className="hidden group-hover:flex">
+                            <ChevronIcon className="opacity-0 transition-opacity ease-in-out duration-200 group-hover:opacity-100" />
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                  </Link>
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-    </Sidebar >
+    </Sidebar>
   );
 };
