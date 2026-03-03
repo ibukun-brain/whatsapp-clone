@@ -76,6 +76,10 @@ export type Chat = {
   favourite: boolean;
   isPinned: boolean;
   timestamp: Date;
+  draft?: {
+    text: string;
+    timestamp: Date;
+  } | null;
   direct_message: DirectMessage | null;
   group_chat: GroupChat | null;
 }
@@ -95,8 +99,8 @@ export type DirectMessageChats = {
   files: [];
   type: MessageType;
   depth: number | null;
-  delivered_date: Date | null;
-  read_date: Date | null;
+  delivered_date?: Date;
+  read_date?: Date;
   forwarded: boolean;
   edited: boolean;
   deleted: boolean;

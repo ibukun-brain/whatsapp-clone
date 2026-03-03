@@ -1109,3 +1109,14 @@ export const CameraIcon = (props: React.SVGProps<SVGSVGElement>) => {
     </svg>
   );
 };
+
+export const SendIcon = (props: React.SVGProps<SVGSVGElement>) => {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};

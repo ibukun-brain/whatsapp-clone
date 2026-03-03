@@ -396,7 +396,7 @@ export const SecondarySidebar = () => {
                             {chat.group_chat?.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat.unread_messages}</Badge>}
                           </span>
                         )}
-                      <div className="hidden group-hover:block">
+                      <div className="hidden group-hover:flex">
                         <ChevronIcon className="opacity-0 transition-opacity ease-in-out duration-200 group-hover:opacity-100" />
                       </div>
                     </div>

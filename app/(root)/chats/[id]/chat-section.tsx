@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import useWebSocket from "react-use-websocket";
 import {
     MicrophoneIcon,
     EmojiIcon,
     AttachmentPlusIcon,
-
+    SendIcon,
 } from "@/components/icons/chats-icon";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
@@ -14,11 +14,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
 import { getDateLabel } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults } from "@/types";
+import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats } from "@/types";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
-import { useTypingStore, EMPTY_TYPING, userTypingType } from "@/lib/stores/typing-store";
+import { useTypingStore, EMPTY_TYPING } from "@/lib/stores/typing-store";
+import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
 
 
 
@@ -77,46 +78,49 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [groupMembers, setGroupMembers] = React.useState<GroupMember[]>([])
     const [groupInfo, setGroupInfo] = React.useState<GroupChatDetail>()
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
+    const [hasText, setHasText] = React.useState(false);
 
-    // ── WebSocket ────────────────────────────────────────────────────
-    const WS_URL = "ws://localhost:8000/ws/chats/";
-    const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
+    // ── Scroll management ─────────────────────────────────────────────
+    // Anchor div at the very bottom of the message list
+    const bottomAnchorRef = useRef<HTMLDivElement>(null);
+
+    // ── WebSocket (per-chat) ──────────────────────────────────────────
+    // Handles send / edit / delete / reply for THIS chat only.
+    // Reconnects automatically when chatId changes.
+    const CHAT_WS_URL = `ws://localhost:8000/ws/chats/${chatId}/`;
+    const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage } = useWebSocket(CHAT_WS_URL, {
         shouldReconnect: () => true,
     });
 
-    const setUserTyping = useTypingStore((s) => s.setUserTyping);
-    const setGroupTyping = useTypingStore((s) => s.setGroupTyping);
+    // ── Global WS send (typing indicators) ───────────────────────────
+    // sendJsonMessage on the global ws/chats/ socket lives in GlobalWsProvider.
+    // We grab the stable reference from the store.
+    const globalSendMessage = useGlobalWsStore((s) => s.sendMessage);
+
     // Array of users currently typing in this chat.
     // Falls back to the stable EMPTY_TYPING constant to avoid re-render loops.
     const typingUsers = useTypingStore((s) => s.typingChats[chatId] ?? EMPTY_TYPING_SET);
 
-    // Handle incoming WebSocket typing events.
-    // Backend contract:
-    //   directmessage → userTypingId: string            (the typing user's ID)
-    //   groupchat     → userTyping:   userTypingType[]   (authoritative list of {id, image?})
+    // Handle incoming per-chat WebSocket events (send / edit / delete / reply).
     React.useEffect(() => {
-        if (!lastJsonMessage) return;
-        console.log(lastJsonMessage);
-        const msg = lastJsonMessage as {
-            chatType?: string;
-            chatId?: string;
-            isTyping?: boolean;
-            userTypingId?: string;          // directmessage
-            userTyping?: userTypingType[];  // groupchat
-        };
-        if (!msg.chatId || typeof msg.isTyping !== "boolean") return;
+        if (!lastChatMessage) return;
+        console.log("[chat-ws]", lastChatMessage);
 
-        if (msg.chatType === "groupchat" && msg.userTyping != null) {
-            // Replace entire list, filtering out ourselves
-            const withoutSelf = msg.userTyping.filter(
-                (u) => !(currentUser && u.id === currentUser.id)
-            );
-            setGroupTyping(msg.chatId, withoutSelf);
-        } else if (msg.chatType === "directmessage" && msg.userTypingId != null) {
-            if (currentUser && msg.userTypingId === currentUser.id) return; // skip own echo
-            setUserTyping(msg.chatId, msg.userTypingId, msg.isTyping);
+        const msg = lastChatMessage as {
+            type?: string;
+            action?: string;
+            data?: DirectMessageChats | GroupMessageChats;
+        };
+        if (msg.type === "dmchat" && msg.action === "send" && msg.data) {
+            db.directmessagechats.put(msg.data as DirectMessageChats);
+            return;
         }
-    }, [lastJsonMessage, setUserTyping, setGroupTyping, currentUser]);
+
+        if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
+            db.groupmessagechats.put(msg.data as GroupMessageChats);
+            return;
+        }
+    }, [lastChatMessage]);
 
     // DMs: any entry in the array means the other person is typing
     const isTyping = directMessage ? typingUsers.length > 0 : false;
@@ -124,19 +128,60 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Determine chat type based on which chat is active
     const chatType = groupMessage ? "groupchat" : "directmessage";
 
+    // Ref for the message input element
+    const inputRef = useRef<HTMLInputElement>(null);
+
     // Debounce ref: clears and resets a timer on every keystroke
     const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isTypingRef = useRef(false);
 
+    // Stops the typing indicator immediately (used after sending a message)
+    const stopTyping = useCallback(() => {
+        if (!currentUser || !isTypingRef.current) return;
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        isTypingRef.current = false;
+        globalSendMessage?.({
+            chatType,
+            chatId,
+            userTypingId: currentUser.id,
+            isTyping: false,
+        });
+    }, [currentUser, chatType, chatId, globalSendMessage]);
+
+    const handleSendMessage = useCallback(() => {
+        const text = inputRef.current?.value.trim();
+        if (!text) return;
+
+        sendChatMessage({
+            type: "dmchat",
+            data: {
+                action: "send",
+                message: { text },
+            },
+        });
+
+        // Clear input and stop typing indicator
+        if (inputRef.current) inputRef.current.value = "";
+        setHasText(false);
+        stopTyping();
+    }, [sendChatMessage, stopTyping]);
+
     const handleTyping = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-        // Only count actual alphabetical key presses
-        if (!/^[a-zA-Z]$/.test(e.key)) return;
+        // Send message on Enter
+        if (e.key === "Enter") {
+            e.preventDefault();
+            handleSendMessage();
+            return;
+        }
+
+        // Only count actual character key presses for the typing indicator
+        if (e.key.length !== 1) return;
         if (!currentUser) return;
 
         // Send isTyping: true immediately (only once per typing session)
         if (!isTypingRef.current) {
             isTypingRef.current = true;
-            sendJsonMessage({
+            globalSendMessage?.({
                 chatType,
                 chatId,
                 userTypingId: currentUser.id,
@@ -148,14 +193,20 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
         typingTimerRef.current = setTimeout(() => {
             isTypingRef.current = false;
-            sendJsonMessage({
+            globalSendMessage?.({
                 chatType,
                 chatId,
                 userTypingId: currentUser.id,
                 isTyping: false,
             });
         }, 1500);
-    }, [currentUser, chatType, chatId, sendJsonMessage]);
+    }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage]);
+
+    // ─── Scroll: always stay at the bottom ──────────────────────────────────
+    const messages = directMessageChats ?? groupMessageChats;
+    useEffect(() => {
+        bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, chatId]);
 
     React.useEffect(() => {
         if (groupMessage && currentUser) {
@@ -272,13 +323,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 return (
                                     <React.Fragment key={msg.id}>
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
+                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={false} />
                                     </React.Fragment>
                                 );
                             });
                         })()}
-                        {/* Bottom spacer */}
-                        <div className="h-2" />
+                        {/* Bottom anchor — used for scroll-to-bottom */}
+                        <div ref={bottomAnchorRef} className="h-2" />
                     </div>
 
                     {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
@@ -326,19 +377,40 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* Text Input */}
                         <div className="flex-1">
                             <input
+                                ref={inputRef}
                                 type="text"
                                 placeholder="Type a message"
                                 className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
+                                onChange={(e) => setHasText(e.target.value.length > 0)}
                                 onKeyDown={handleTyping}
                             />
                         </div>
 
-                        {/* Mic */}
-                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                            <MicrophoneIcon
-                                style={{ width: "24px", height: "24px" }}
-                                className="text-[#54656f]"
-                            />
+                        {/* Mic / Send */}
+                        <button
+                            onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
+                            onClick={hasText ? handleSendMessage : undefined}
+                            className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-all shrink-0 cursor-pointer"
+                        >
+                            <span
+                                className="transition-all duration-150"
+                                style={{
+                                    display: "inline-flex",
+                                    transform: hasText ? "scale(1.1) rotate(0deg)" : "scale(1) rotate(0deg)",
+                                }}
+                            >
+                                {hasText ? (
+                                    <SendIcon
+                                        style={{ width: "24px", height: "24px" }}
+                                        className="text-[#54656f]"
+                                    />
+                                ) : (
+                                    <MicrophoneIcon
+                                        style={{ width: "24px", height: "24px" }}
+                                        className="text-[#54656f]"
+                                    />
+                                )}
+                            </span>
                         </button>
                     </footer>
                 </div>

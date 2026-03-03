@@ -1,14 +1,12 @@
-import { CheckIcon2 } from "@/components/icons/chats-icon";
+import { CheckIcon1, CheckIcon2 } from "@/components/icons/chats-icon";
 import { getDateTimeByTimezone } from "@/lib/utils";
 import { DirectMessageChats, GroupMessageChats, User } from "@/types";
 
-const ReadReceipt = ({ read }: { read?: boolean }) => (
-    <CheckIcon2
-        height={16}
-        width={16}
-        className={read ? "text-[#53bdeb]" : "text-[#8696a0]"}
-    />
-);
+const ReadReceipt = ({ read_date, delivered_date }: { read_date?: Date, delivered_date?: Date }) => {
+    return (
+        read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : delivered_date && !read_date ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" /> : <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />
+    )
+}
 
 
 // ─── Bubble Tails ─────────────────────────────────────────────────
@@ -136,7 +134,7 @@ const MessageBubble = ({ msg, currentUser, isDM }: { msg: DirectMessageChats | G
                     {/* Timestamp + read receipts */}
                     <div className="flex items-center justify-end gap-1 -mt-3 float-right ml-2">
                         <span className="text-[11px] text-[#667781]">{time}</span>
-                        {isDM && isMine && <ReadReceipt read={(msg as DirectMessageChats).read_date ? true : false} />}
+                        {isDM && isMine && <ReadReceipt read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} />}
                     </div>
                     <div className="clear-both" />
                 </div>
