@@ -76,7 +76,7 @@ export const SecondarySidebar = () => {
   // Determine if the active chat was a draft when we entered it and its recency.
   // This ensures the sorting stays "sticky" while you are working.
   const [activeChatLatchedDraft, setActiveChatLatchedDraft] = React.useState(false);
-  const [activeChatLatchedTime, setActiveChatLatchedTime] = React.useState<number | null>(null);
+  const [activeChatLatchedDraftTime, setActiveChatLatchedDraftTime] = React.useState<number>(0);
 
   React.useEffect(() => {
     if (activeChatId) {
@@ -85,14 +85,13 @@ export const SecondarySidebar = () => {
         .then(chat => {
           if (chat) {
             setActiveChatLatchedDraft(!!chat.draft?.text);
-            const msgTime = new Date(chat.timestamp).getTime();
             const draftTime = chat.draft?.timestamp ? new Date(chat.draft.timestamp).getTime() : 0;
-            setActiveChatLatchedTime(Math.max(msgTime, draftTime));
+            setActiveChatLatchedDraftTime(draftTime);
           }
         });
     } else {
       setActiveChatLatchedDraft(false);
-      setActiveChatLatchedTime(null);
+      setActiveChatLatchedDraftTime(0);
     }
   }, [activeChatId]);
 
@@ -124,35 +123,21 @@ export const SecondarySidebar = () => {
         const idA = a.direct_message?.id || a.group_chat?.id;
         const idB = b.direct_message?.id || b.group_chat?.id;
 
-        // Draft Priority Logic (Locked while active)
-        const hasDraftA = (idA === activeChatId) ? activeChatLatchedDraft : !!a.draft?.text;
-        const hasDraftB = (idB === activeChatId) ? activeChatLatchedDraft : !!b.draft?.text;
+        // Recency Logic (Locked ONLY for draft time while active)
+        const msgTimeA = new Date(a.timestamp).getTime();
+        const rawDraftTimeA = a.draft?.timestamp ? new Date(a.draft.timestamp).getTime() : 0;
+        const draftTimeA = (idA === activeChatId) ? activeChatLatchedDraftTime : rawDraftTimeA;
+        const timeA = Math.max(msgTimeA, draftTimeA);
 
-        if (hasDraftA !== hasDraftB) return hasDraftA ? -1 : 1;
-
-        // Recency Logic (Locked while active)
-        let timeA: number;
-        if (idA === activeChatId && activeChatLatchedTime !== null) {
-          timeA = activeChatLatchedTime;
-        } else {
-          const msgTime = new Date(a.timestamp).getTime();
-          const draftTime = a.draft?.timestamp ? new Date(a.draft.timestamp).getTime() : 0;
-          timeA = Math.max(msgTime, draftTime);
-        }
-
-        let timeB: number;
-        if (idB === activeChatId && activeChatLatchedTime !== null) {
-          timeB = activeChatLatchedTime;
-        } else {
-          const msgTime = new Date(b.timestamp).getTime();
-          const draftTime = b.draft?.timestamp ? new Date(b.draft.timestamp).getTime() : 0;
-          timeB = Math.max(msgTime, draftTime);
-        }
+        const msgTimeB = new Date(b.timestamp).getTime();
+        const rawDraftTimeB = b.draft?.timestamp ? new Date(b.draft.timestamp).getTime() : 0;
+        const draftTimeB = (idB === activeChatId) ? activeChatLatchedDraftTime : rawDraftTimeB;
+        const timeB = Math.max(msgTimeB, draftTimeB);
 
         return timeB - timeA;
       });
     },
-    [page, activeChatId, activeChatLatchedDraft, activeChatLatchedTime]
+    [page, activeChatId, activeChatLatchedDraft, activeChatLatchedDraftTime]
   );
   const currentUser = useLiveQuery(
     async () => await db.user.toCollection().first()

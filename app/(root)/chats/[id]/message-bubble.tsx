@@ -1,4 +1,5 @@
 import { CheckIcon1, CheckIcon2 } from "@/components/icons/chats-icon";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone } from "@/lib/utils";
 import { DirectMessageChats, GroupMessageChats, User } from "@/types";
 
@@ -28,21 +29,20 @@ const ReceivedTail = () => (
 );
 
 
-const MessageBubble = ({ msg, currentUser, isDM }: { msg: DirectMessageChats | GroupMessageChats, currentUser: User, isDM: boolean }) => {
-    const isMine = msg.user === currentUser.id;
+const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg: DirectMessageChats | GroupMessageChats, currentUser: User, isDM: boolean, isConsecutive?: boolean }) => {
+    const isMine = isDM ? msg.user === currentUser.id : (msg.user as User).id === currentUser.id;
     const { time } = getDateTimeByTimezone(msg.timestamp, currentUser.timezone);
     const bgColor = isMine ? "bg-[#d9fdd3]" : "bg-white";
     const alignClass = isMine ? "justify-end" : "justify-start";
 
-    function getContactNameOrNumber() { }
 
     if (isDM) {
         // DM chats
         return (
             <div className={`flex ${alignClass} px-[63px] mb-1`}>
-                <div className={`relative max-w-[65%] ${bgColor} rounded-lg shadow-sm px-2 py-1`}>
+                <div className={`relative max-w-[65%] ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
                     {/* Bubble tail - show on first message or when direction changes */}
-                    {isMine ? <SentTail /> : <ReceivedTail />}
+                    {!isConsecutive && (isMine ? <SentTail /> : <ReceivedTail />)}
 
                     {/* Sender name for specific messages */}
                     {/* {msg.senderName && msg.type !== "status-reply" && (
@@ -143,10 +143,16 @@ const MessageBubble = ({ msg, currentUser, isDM }: { msg: DirectMessageChats | G
     } else {
         // Group Chats
         return (
-            <div className={`flex ${alignClass} px-[63px] mb-1`}>
-                <div className={`relative max-w-[65%] ${bgColor} rounded-lg shadow-sm px-2 py-1`}>
+            <div className={`flex ${alignClass} gap-1 px-[63px] mb-1`}>
+                {!isMine && (
+                    <Avatar className={`h-8 w-8 border shrink-0 ${isConsecutive ? 'invisible' : ''}`}>
+                        <AvatarImage src={(msg.user as User).profile_pic ?? undefined} />
+                        <AvatarFallback className="text-sm bg-[#dfe5e7]">{(msg.user as User)?.display_name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                )}
+                <div className={`relative max-w-[65%] ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
                     {/* Bubble tail - show on first message or when direction changes */}
-                    {isMine ? <SentTail /> : <ReceivedTail />}
+                    {!isConsecutive && (isMine ? <SentTail /> : <ReceivedTail />)}
 
                     {/* Sender name for specific messages */}
                     {/* {msg.senderName && msg.type !== "status-reply" && (

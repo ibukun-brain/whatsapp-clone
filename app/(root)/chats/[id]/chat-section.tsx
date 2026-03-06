@@ -14,13 +14,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
 import { getDateLabel } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats } from "@/types";
+import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat } from "@/types";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
 import { useTypingStore, EMPTY_TYPING } from "@/lib/stores/typing-store";
 import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
-
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -114,14 +113,17 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Handle incoming per-chat WebSocket events (send / edit / delete / reply).
     React.useEffect(() => {
         if (!lastChatMessage) return;
-        console.log("[chat-ws]", lastChatMessage);
+        // console.log("[chat-ws]", lastChatMessage);
 
         const msg = lastChatMessage as {
             type?: string;
             action?: string;
-            data?: DirectMessageChats | GroupMessageChats;
+            data?: DirectMessageChats | GroupMessageChats | Chat;
+            [key: string]: any;
         };
-        if (msg.type === "dmchat" && msg.action === "send" && msg.data) {
+
+
+        if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
             db.directmessagechats.put(msg.data as DirectMessageChats);
             return;
         }
@@ -163,7 +165,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (!text) return;
 
         sendChatMessage({
-            type: "dmchat",
+            type: chatType,
             data: {
                 action: "send",
                 message: { text },
@@ -385,14 +387,16 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* direct message chats */}
                         {currentUser && directMessageChats && directMessageChats.length > 0 && (() => {
                             let lastDateLabel = "";
-                            return directMessageChats?.map((msg) => {
+                            return directMessageChats?.map((msg, index) => {
+                                const prevMsg = index > 0 ? directMessageChats[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                 const showSeparator = dateLabel !== lastDateLabel;
                                 if (showSeparator) lastDateLabel = dateLabel;
+                                const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                 return (
                                     <React.Fragment key={msg.id}>
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} />
+                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} isConsecutive={isConsecutive} />
                                     </React.Fragment>
                                 );
                             });
@@ -401,14 +405,16 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* group message chats */}
                         {currentUser && groupMessageChats && groupMessageChats.length > 0 && (() => {
                             let lastDateLabel = "";
-                            return groupMessageChats?.map((msg) => {
+                            return groupMessageChats?.map((msg, index) => {
+                                const prevMsg = index > 0 ? groupMessageChats[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                 const showSeparator = dateLabel !== lastDateLabel;
                                 if (showSeparator) lastDateLabel = dateLabel;
+                                const isConsecutive = !showSeparator && (prevMsg?.user as User)?.id === (msg.user as User)?.id;
                                 return (
                                     <React.Fragment key={msg.id}>
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={false} />
+                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={false} isConsecutive={isConsecutive} />
                                     </React.Fragment>
                                 );
                             });
