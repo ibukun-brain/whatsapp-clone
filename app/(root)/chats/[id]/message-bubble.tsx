@@ -3,9 +3,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone } from "@/lib/utils";
 import { DirectMessageChats, GroupMessageChats, User } from "@/types";
 
-const ReadReceipt = ({ read_date, delivered_date }: { read_date?: Date, delivered_date?: Date }) => {
+const ReadReceipt = ({ read_date, delivered_date, receipt }: { read_date?: Date, delivered_date?: Date, receipt?: "sent" | "delivered" | "read" }) => {
     return (
-        read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : delivered_date && !read_date ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" /> : <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />
+        read_date || receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : delivered_date && !read_date || receipt === "delivered" ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" /> : <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />
     )
 }
 
@@ -40,7 +40,7 @@ const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg:
         // DM chats
         return (
             <div className={`flex ${alignClass} px-[63px] mb-1`}>
-                <div className={`relative max-w-[65%] ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
+                <div className={`relative max-w-[65%] 0.5 ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
                     {/* Bubble tail - show on first message or when direction changes */}
                     {!isConsecutive && (isMine ? <SentTail /> : <ReceivedTail />)}
 
@@ -150,7 +150,7 @@ const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg:
                         <AvatarFallback className="text-sm bg-[#dfe5e7]">{(msg.user as User)?.display_name.slice(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                 )}
-                <div className={`relative max-w-[65%] ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
+                <div className={`relative max-w-[65%] mb-0.5 ${bgColor} rounded-lg ${!isConsecutive ? (isMine ? 'rounded-tr-none' : 'rounded-tl-none') : ''} shadow-sm px-2 py-1`}>
                     {/* Bubble tail - show on first message or when direction changes */}
                     {!isConsecutive && (isMine ? <SentTail /> : <ReceivedTail />)}
 
@@ -244,7 +244,7 @@ const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg:
                     {/* Timestamp + read receipts */}
                     <div className="flex items-center justify-end gap-1 -mt-3 float-right ml-2">
                         <span className="text-[11px] text-[#667781]">{time}</span>
-                        {/* {isMine && <ReadReceipt read={msg.read_date ? true : false} />} */}
+                        {isMine && <ReadReceipt receipt={(msg as GroupMessageChats).receipt} />}
                     </div>
                     <div className="clear-both" />
                 </div>

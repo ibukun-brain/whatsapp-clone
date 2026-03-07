@@ -45,6 +45,10 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
         const msg = lastJsonMessage as {
             type?: string;
             data?: {
+                user: {
+                    "id": string,
+                    "unread_messages": number
+                }
                 chat: Chat,
             };
             chat?: Chat; // Handle cases where chat is at root
@@ -58,6 +62,8 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
 
         if (msg.type === "handle_user_chatlist_update") {
             const chatData = msg.data?.chat || msg.chat;
+            const userData = msg.data?.user;
+            console.log(msg)
             if (!chatData) return;
 
             const updateChatList = async () => {
@@ -88,6 +94,13 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             await db.chatlist.put(chatData);
                         }
                     });
+
+                    // 2. Update user's unread_messages count in IndexedDB
+                    if (userData?.id && typeof userData.unread_messages === 'number') {
+                        await db.user.update(userData.id, {
+                            unread_messages: userData.unread_messages,
+                        });
+                    }
                 } catch (error) {
                     console.error("Failed to update chatlist via WS", error);
                 }

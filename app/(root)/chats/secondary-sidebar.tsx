@@ -436,7 +436,7 @@ export const SecondarySidebar = () => {
                                 const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id);
                                 return (
                                   <>
-                                    {chat.group_chat ? <span className="text-[#00a884] font-normal">{typingList.length > 1 ? `${typingList.length} people typing` : user?.contact_name || latestTyper.phone} is typing</span> : <span className="text-[#00a884] font-normal">Typing</span>}
+                                    {chat.group_chat ? <span className="text-[#00a884] font-normal">{typingList.length > 1 ? `${typingList.length} people typing...` : user?.contact_name || latestTyper.phone} is typing...</span> : <span className="text-[#00a884] font-normal">typing...</span>}
 
                                   </>);
                               }
@@ -467,11 +467,15 @@ export const SecondarySidebar = () => {
                                   {chat.group_chat && chat.direct_message === null && (
                                     <>
                                       {chat.group_chat.recent_content && (
-                                        <>
-                                          {currentUser?.id === chat.group_chat.recent_user_id ? <span>You:{" "}</span> : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)}
-                                          <span>{chat.group_chat.recent_content}</span>
-                                        </>
+                                        currentUser?.id === chat.group_chat.recent_user_id ? (
+                                          <>
+                                            <span className="inline-flex absolute space-x-3">
+                                              {chat.group_chat.receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.group_chat.receipt === "delivered" ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                            </span>
+                                            <span className="pl-4.5">You:{" "}</span>
+                                          </>) : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)
                                       )}
+                                      <span>{chat.group_chat.recent_content}</span>
                                     </>
                                   )}
                                 </>

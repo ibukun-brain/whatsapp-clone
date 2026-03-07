@@ -42,6 +42,7 @@ export type GroupChat = {
   id: string;
   name: string;
   image: string | null;
+  receipt: "sent" | "delivered" | "read",
   recent_user_id: string;
   recent_user_display_name: string;
   recent_content: string;
@@ -138,6 +139,7 @@ export type GroupMessageChats = {
   edited: boolean,
   deleted: boolean,
   timestamp: Date
+  receipt: "sent" | "delivered" | "read"
 }
 
 export type GroupMessageChatsResults = {
