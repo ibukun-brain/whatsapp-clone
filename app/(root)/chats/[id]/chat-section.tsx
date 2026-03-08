@@ -366,8 +366,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         directMessageUserInfo={
                             directMessage ? {
                                 name: directMessage.name as DirectMessageName,
-                                userId: directMessage.direct_message?.recent_user_id as string,
+                                userId: directMessage.direct_message?.dm_user_id as string,
                                 image: directMessage.direct_message?.image as string,
+                                lastSeen: directMessage.direct_message?.last_seen ?? null,
+                                isOnline: !!directMessage.direct_message?.is_online,
                             } : null
                         }
                         groupMessageInfo={
@@ -378,6 +380,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             } : null
                         }
                         groupMembers={groupMembers}
+                        timezone={currentUser?.timezone}
                     />
 
                     {/* ── Messages Area ───────────────────────────────────── */}

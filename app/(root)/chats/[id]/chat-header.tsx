@@ -4,13 +4,15 @@ import React from "react"
 import { ChevronIcon, MenuIcon, SearchIcon, VideoCallIcon } from "@/components/icons/chats-icon"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { DirectMessageName, GroupMember, GroupMemberResults } from "@/types"
-import { cn } from "@/lib/utils"
+import { DirectMessageName, GroupMember } from "@/types"
+import { cn, formatLastSeen } from "@/lib/utils"
 
 type DirectMessageUserInfo = {
     name: DirectMessageName,
     userId: string,
-    image: string
+    image: string,
+    lastSeen: Date | null,
+    isOnline: boolean
 }
 
 type GroupMessageUserInfo = {
@@ -19,12 +21,13 @@ type GroupMessageUserInfo = {
     image: string
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping }: {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping, timezone }: {
     directMessageUserInfo: DirectMessageUserInfo | null,
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
     groupMembers?: GroupMember[],
-isTyping?: boolean,
+    isTyping?: boolean,
+    timezone?: string,
 }) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
     const [showGroupHint, setShowGroupHint] = React.useState(true)
@@ -57,13 +60,24 @@ isTyping?: boolean,
                             <span className="text-[16px] font-normal text-[#111b21]">
                                 {directMessageUserInfo?.name?.contact_name}
                             </span>
-                            {isTyping ? (
+                            {isTyping && (
                                 <span className="text-[12px] font-normal text-[#00a884]">
                                     Typing…
                                 </span>
-                            ) : showContactHint && (
+                            )}
+                            {!isTyping && directMessageUserInfo?.isOnline && (
+                                <span className="text-[12px] font-normal">
+                                    Online
+                                </span>
+                            )}
+                            {!isTyping && !directMessageUserInfo?.isOnline && showContactHint && (
                                 <span className="text-[12px] font-normal text-[#54656f]">
                                     Click here for contact info
+                                </span>
+                            )}
+                            {!isTyping && !directMessageUserInfo?.isOnline && !showContactHint && directMessageUserInfo?.lastSeen && (
+                                <span className="text-[12px] font-normal text-[#54656f]">
+                                    last seen {formatLastSeen(directMessageUserInfo.lastSeen, timezone)}
                                 </span>
                             )}
                         </div>

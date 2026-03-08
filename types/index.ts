@@ -31,11 +31,14 @@ export type DirectMessage = {
   image: string | null;
   bio?: string;
   phone?: string;
+  dm_user_id: string;
   recent_user_id: string;
   delivered_date: Date | null;
   read_date: Date | null;
   recent_content: string;
   unread_messages: number;
+  last_seen: Date | null;
+  is_online?: boolean;
 }
 
 export type GroupChat = {

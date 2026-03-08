@@ -45,11 +45,16 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
         const msg = lastJsonMessage as {
             type?: string;
             data?: {
-                user: {
+                user?: {
                     "id": string,
                     "unread_messages": number
                 }
-                chat: Chat,
+                chat?: Chat,
+                offline_user?: {
+                    "user_id": string,
+                    "last_seen": Date,
+                },
+                online_userid?: string
             };
             chat?: Chat; // Handle cases where chat is at root
             // Typing indicator fields
@@ -60,10 +65,64 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             userTyping?: userTypingType[]; // groupchat
         };
 
-        if (msg.type === "handle_user_chatlist_update") {
+        if (msg.type === "online_user" && msg.data?.online_userid) {
+            const user_id = msg.data.online_userid;
+            const updateOnlineStatus = async () => {
+                try {
+                    await db.transaction('rw', db.chatlist, async () => {
+                        const chatsToUpdate = await db.chatlist
+                            .filter(c => c.direct_message?.dm_user_id === user_id)
+                            .toArray();
+
+                        for (const chat of chatsToUpdate) {
+                            if (chat.direct_message) {
+                                await db.chatlist.update(chat.id, {
+                                    direct_message: {
+                                        ...chat.direct_message,
+                                        is_online: true
+                                    }
+                                });
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.error("Failed to update online status", error);
+                }
+            };
+            updateOnlineStatus();
+        }
+
+        if (msg.type === "offline_user" && msg.data?.offline_user) {
+            const { user_id, last_seen } = msg.data.offline_user;
+            const updateOfflineStatus = async () => {
+                try {
+                    await db.transaction('rw', db.chatlist, async () => {
+                        const chatsToUpdate = await db.chatlist
+                            .filter(c => c.direct_message?.dm_user_id === user_id)
+                            .toArray();
+
+                        for (const chat of chatsToUpdate) {
+                            if (chat.direct_message) {
+                                await db.chatlist.update(chat.id, {
+                                    direct_message: {
+                                        ...chat.direct_message,
+                                        last_seen: new Date(last_seen),
+                                        is_online: false
+                                    }
+                                });
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.error("Failed to update offline status", error);
+                }
+            };
+            updateOfflineStatus();
+        }
+
+        if (msg.type === "handle_user_chatlist_update" && msg.data?.chat && msg.data?.user) {
             const chatData = msg.data?.chat || msg.chat;
             const userData = msg.data?.user;
-            console.log(msg)
             if (!chatData) return;
 
             const updateChatList = async () => {
@@ -111,7 +170,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
 
         // ── Typing indicator ────────────────────────────────────────────
         if (msg.chatId && typeof msg.isTyping === "boolean") {
-            if (msg.chatType === "groupchat" && msg.userTyping != null) {
+            if (msg.type === "typing" && msg.chatType === "groupchat" && msg.userTyping != null) {
                 // Use the latest value from the live query without triggering effects
                 db.user.toCollection().first().then(user => {
                     const withoutSelf = msg.userTyping!.filter(

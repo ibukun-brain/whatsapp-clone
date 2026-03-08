@@ -145,6 +145,86 @@ export function getDateLabel(
   });
 }
 
+/**
+ * Formats a last seen date for the chat header.
+ * Expected format: 
+ * - Today: "at 1:27pm"
+ * - Yesterday: "yesterday at 1:27pm"
+ * - Within week: '"Tue" at 1:27pm'
+ * - Older: "on 02/06/2026 at 1:27pm"
+ */
+export function formatLastSeen(
+  datetime: Date | string,
+  userTimezone: string = "UTC"
+): string {
+  const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+  const now = new Date();
+
+  // Get parts in user timezone
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const parts = formatter.formatToParts(inputDate);
+  const timeStr = inputDate.toLocaleTimeString("en-US", {
+    timeZone: userTimezone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).toLowerCase();
+
+  // Compare calendar dates (timezone-aware)
+  const msgParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(inputDate);
+  const msgYear = Number(msgParts.find(p => p.type === "year")!.value);
+  const msgMonth = Number(msgParts.find(p => p.type === "month")!.value) - 1;
+  const msgDay = Number(msgParts.find(p => p.type === "day")!.value);
+
+  const nowParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const nowYear = Number(nowParts.find(p => p.type === "year")!.value);
+  const nowMonth = Number(nowParts.find(p => p.type === "month")!.value) - 1;
+  const nowDay = Number(nowParts.find(p => p.type === "day")!.value);
+
+  const msgDateOnly = new Date(msgYear, msgMonth, msgDay);
+  const nowDateOnly = new Date(nowYear, nowMonth, nowDay);
+  const diffDays = Math.floor(
+    (nowDateOnly.getTime() - msgDateOnly.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays === 0) return `today at ${timeStr}`;
+  if (diffDays === 1) return `yesterday at ${timeStr}`;
+  if (diffDays >= 2 && diffDays <= 6) {
+    const weekday = inputDate.toLocaleDateString("en-US", {
+      timeZone: userTimezone,
+      weekday: "short",
+    });
+    return `"${weekday}" ${timeStr}`;
+  }
+
+  const dateStr = inputDate.toLocaleDateString("en-US", {
+    timeZone: userTimezone,
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+  return `on ${dateStr} ${timeStr}`;
+}
+
 export const chatCategories = [
   {
     title: "All",
