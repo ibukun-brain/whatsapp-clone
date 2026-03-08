@@ -113,15 +113,34 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Handle incoming per-chat WebSocket events (send / edit / delete / reply).
     React.useEffect(() => {
         if (!lastChatMessage) return;
-        // console.log("[chat-ws]", lastChatMessage);
 
         const msg = lastChatMessage as {
-            type?: string;
+            type?: "directmessage" | "groupchat" | "group_online_users";
             action?: string;
-            data?: DirectMessageChats | GroupMessageChats | Chat;
+            data?: DirectMessageChats | GroupMessageChats | Chat | {
+                "group_id": string,
+                online_users: number
+            };
             [key: string]: any;
         };
 
+        if (msg.type === "group_online_users" && msg.data && "online_users" in msg.data) {
+            const count = msg.data.online_users;
+            const groupId = msg.data.group_id;
+            const updateGroupOnline = async () => {
+                const chat = await db.chatlist.filter(c => c.group_chat?.id === groupId).first();
+                if (chat?.group_chat) {
+                    await db.chatlist.update(chat.id, {
+                        group_chat: {
+                            ...chat.group_chat,
+                            online_users: count
+                        }
+                    });
+                }
+            };
+            updateGroupOnline();
+            return;
+        }
 
         if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
             db.directmessagechats.put(msg.data as DirectMessageChats);
@@ -376,7 +395,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             groupMessage ? {
                                 groupId: chatId,
                                 name: groupMessage.name as string,
-                                image: groupMessage.group_chat?.image as string
+                                image: groupMessage.group_chat?.image as string,
+                                onlineUsersCount: groupMessage.group_chat?.online_users
                             } : null
                         }
                         groupMembers={groupMembers}

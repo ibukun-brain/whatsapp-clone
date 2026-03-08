@@ -13,7 +13,7 @@ export class WhatsappCloneDB extends Dexie {
 
     constructor() {
         super('WhatsappCloneDB');
-        this.version(14).stores({
+        this.version(2).stores({
             chatlist: 'id, name, timestamp', // id is primary key
             usersettings: '++id', // Singleton store, usually id=1
             user: 'id', // user id is primary key

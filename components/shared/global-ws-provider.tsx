@@ -65,7 +65,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             userTyping?: userTypingType[]; // groupchat
         };
 
-        if (msg.type === "online_user" && msg.data?.online_userid) {
+        if (msg.type === "dm_online_user" && msg.data?.online_userid) {
             const user_id = msg.data.online_userid;
             const updateOnlineStatus = async () => {
                 try {
@@ -92,7 +92,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             updateOnlineStatus();
         }
 
-        if (msg.type === "offline_user" && msg.data?.offline_user) {
+        if (msg.type === "dm_offline_user" && msg.data?.offline_user) {
             const { user_id, last_seen } = msg.data.offline_user;
             const updateOfflineStatus = async () => {
                 try {
@@ -127,6 +127,10 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
 
             const updateChatList = async () => {
                 try {
+                    if (!chatData.id) {
+                        console.warn("Received chat update without id:", chatData);
+                        return;
+                    }
                     await db.transaction('rw', db.chatlist, async () => {
                         // 1. Find existing chat to preserve metadata (drafts, isPinned)
                         // Note: We use the most reliable identifiers

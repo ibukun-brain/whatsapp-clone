@@ -213,7 +213,7 @@ export function formatLastSeen(
       timeZone: userTimezone,
       weekday: "short",
     });
-    return `"${weekday}" ${timeStr}`;
+    return `"${weekday}" at ${timeStr}`;
   }
 
   const dateStr = inputDate.toLocaleDateString("en-US", {
@@ -222,7 +222,7 @@ export function formatLastSeen(
     day: "2-digit",
     year: "numeric",
   });
-  return `on ${dateStr} ${timeStr}`;
+  return `on ${dateStr} at ${timeStr}`;
 }
 
 export const chatCategories = [

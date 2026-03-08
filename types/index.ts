@@ -50,6 +50,7 @@ export type GroupChat = {
   recent_user_display_name: string;
   recent_content: string;
   unread_messages: number;
+  online_users?: number;
   // Add other group chat properties as needed
 }
 
