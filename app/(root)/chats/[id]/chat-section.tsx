@@ -51,6 +51,15 @@ const DateSeparator = ({ label }: { label: string }) => (
     </div>
 );
 
+const UnreadBanner = React.forwardRef<HTMLDivElement, { count: number }>(({ count }, ref) => (
+    <div ref={ref} className="flex justify-center my-3 bg-background-secondary py-1.5">
+        <span className="bg-background text-[12.5px] px-3 py-1.5 rounded-full shadow-sm">
+            {count} unread {count === 1 ? 'message' : 'messages'}
+        </span>
+    </div>
+));
+UnreadBanner.displayName = "UnreadBanner";
+
 
 
 // ─── Main Component ───────────────────────────────────────────────
@@ -92,6 +101,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // ── Scroll management ─────────────────────────────────────────────
     // Anchor div at the very bottom of the message list
     const bottomAnchorRef = useRef<HTMLDivElement>(null);
+    const unreadBannerRef = useRef<HTMLDivElement>(null);
+    const hasScrolledToUnreadRef = useRef<string | null>(null);
 
     // ── WebSocket (per-chat) ──────────────────────────────────────────
     // Handles send / edit / delete / reply for THIS chat only.
@@ -311,7 +322,12 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // ─── Scroll: always stay at the bottom ──────────────────────────────────
     const messages = directMessageChats ?? groupMessageChats;
     useEffect(() => {
-        bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+        if (unreadBannerRef.current && hasScrolledToUnreadRef.current !== chatId) {
+            unreadBannerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+            hasScrolledToUnreadRef.current = chatId;
+        } else {
+            bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
     }, [messages, chatId]);
 
     React.useEffect(() => {
@@ -410,6 +426,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* direct message chats */}
                         {currentUser && directMessageChats && directMessageChats.length > 0 && (() => {
                             let lastDateLabel = "";
+                            const unreadMessages = directMessageChats.filter(msg => msg.user !== currentUser.id && !msg.read_date);
+                            const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
+
                             return directMessageChats?.map((msg, index) => {
                                 const prevMsg = index > 0 ? directMessageChats[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
@@ -418,6 +437,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                 return (
                                     <React.Fragment key={msg.id}>
+                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadMessages.length} ref={unreadBannerRef} />}
                                         {showSeparator && <DateSeparator label={dateLabel} />}
                                         <MessageBubble msg={msg} currentUser={currentUser} isDM={true} isConsecutive={isConsecutive} />
                                     </React.Fragment>
@@ -428,6 +448,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* group message chats */}
                         {currentUser && groupMessageChats && groupMessageChats.length > 0 && (() => {
                             let lastDateLabel = "";
+                            const unreadMessages = groupMessageChats.filter(msg => (msg.user as User)?.id !== currentUser.id && msg.receipt !== "read");
+                            const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
+
                             return groupMessageChats?.map((msg, index) => {
                                 const prevMsg = index > 0 ? groupMessageChats[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
@@ -437,6 +460,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 return (
                                     <React.Fragment key={msg.id}>
                                         {showSeparator && <DateSeparator label={dateLabel} />}
+                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadMessages.length} ref={unreadBannerRef} />}
                                         <MessageBubble msg={msg} currentUser={currentUser} isDM={false} isConsecutive={isConsecutive} />
                                     </React.Fragment>
                                 );

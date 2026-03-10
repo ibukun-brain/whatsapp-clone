@@ -6,7 +6,7 @@ import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
 import { useTypingStore, userTypingType } from "@/lib/stores/typing-store";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
-import { Chat } from "@/types";
+import { Chat, DirectMessageChats, GroupMessageChats } from "@/types";
 
 /**
  * GlobalWsProvider
@@ -55,6 +55,12 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                     "last_seen": Date,
                 },
                 online_userid?: string
+                read_by?: string
+                read?: boolean
+                direct_message_id?: string,
+                groupchat_id?: string,
+                read_date?: Date,
+                message?: DirectMessageChats | GroupMessageChats
             };
             chat?: Chat; // Handle cases where chat is at root
             // Typing indicator fields
@@ -64,6 +70,55 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             userTypingId?: string;       // directmessage
             userTyping?: userTypingType[]; // groupchat
         };
+
+        if (msg.type === "dm_chat_message_read" && msg.data?.read && msg.data?.direct_message_id) {
+            const { direct_message_id, read_by, read_date } = msg.data;
+            const isMe = read_by === currentUser?.id;
+
+            const updateReadDate = async () => {
+                try {
+                    // 1. Update directmessagechats table
+                    if (!isMe) {
+                        await db.transaction('rw', db.directmessagechats, async () => {
+                            const messagesToUpdate = await db.directmessagechats
+                                .filter(m => m.direct_message_id === direct_message_id && m.user !== read_by && !m.read_date)
+                                .toArray();
+
+                            for (const message of messagesToUpdate) {
+                                await db.directmessagechats.update(message.id, {
+                                    read_date: read_date ? new Date(read_date) : new Date()
+                                });
+                            }
+                        });
+                    }
+
+                    // 2. Update chatlist table
+                    await db.transaction('rw', db.chatlist, async () => {
+                        const chat = await db.chatlist.filter(c => c.direct_message?.id === direct_message_id).first();
+                        if (chat?.direct_message) {
+                            const updateData: any = {
+                                direct_message: {
+                                    ...chat.direct_message,
+                                }
+                            };
+
+                            if (isMe) {
+                                // If I read the messages, clear the unread count
+                                updateData.direct_message.unread_messages = 0;
+                            } else if (chat.direct_message.recent_user_id !== read_by) {
+                                // If the other person read MY messages, update the read_date (blue ticks)
+                                updateData.direct_message.read_date = read_date ? new Date(read_date) : new Date();
+                            }
+
+                            await db.chatlist.update(chat.id, updateData);
+                        }
+                    });
+                } catch (error) {
+                    console.error("Failed to update read date via WS", error);
+                }
+            };
+            updateReadDate();
+        }
 
         if (msg.type === "dm_online_user" && msg.data?.online_userid) {
             const user_id = msg.data.online_userid;
@@ -90,6 +145,19 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                 }
             };
             updateOnlineStatus();
+
+            // send an event to set every unread messages o delivered status when the user is online
+            if (currentUser?.id !== user_id) {
+                // only send this event if currentuser is not the online user
+                sendJsonMessage({
+                    type: "send_chat_message_delivery_broadcast",
+                    data: {
+                        onlineUserId: user_id
+                    }
+
+                })
+            }
+
         }
 
         if (msg.type === "dm_offline_user" && msg.data?.offline_user) {
@@ -157,7 +225,6 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             await db.chatlist.put(chatData);
                         }
                     });
-
                     // 2. Update user's unread_messages count in IndexedDB
                     if (userData?.id && typeof userData.unread_messages === 'number') {
                         await db.user.update(userData.id, {
@@ -169,7 +236,46 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                 }
             };
             updateChatList();
+
+            const updateMessage = async () => {
+                try {
+                    const message = msg.data?.message;
+                    const directMessageId = msg.data?.direct_message_id
+                    const groupChatId = msg.data?.groupchat_id
+
+                    if (!message) return;
+
+                    if (directMessageId) {
+                        const directChatMessage = message as DirectMessageChats;
+                        const existing = await db.directmessagechats.get(directChatMessage.id);
+                        const chat = await db.chatlist.filter(c =>
+                            (c.direct_message?.id === directMessageId)
+                        ).first();
+                        if (!existing && chat) {
+                            await db.directmessagechats.put(
+                                directChatMessage,
+                            );
+                        }
+                    } else if (groupChatId) {
+                        const groupChatMessage = message as GroupMessageChats;
+                        const existing = await db.groupmessagechats.get(groupChatMessage.id);
+                        const chat = await db.chatlist.filter(c =>
+                            (c.group_chat?.id === groupChatId)
+                        ).first();
+                        if (!existing && chat) {
+                            alert("asdjkasdad")
+                            await db.groupmessagechats.put(
+                                groupChatMessage,
+                            );
+                        }
+                    }
+                } catch (error) {
+                    console.error("Failed to update message via WS", error);
+                }
+            }
+            updateMessage();
             return;
+
         }
 
         // ── Typing indicator ────────────────────────────────────────────
