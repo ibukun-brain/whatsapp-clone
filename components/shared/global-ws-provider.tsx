@@ -74,6 +74,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
         if (msg.type === "dm_chat_message_read" && msg.data?.read && msg.data?.direct_message_id) {
             const { direct_message_id, read_by, read_date } = msg.data;
             const isMe = read_by === currentUser?.id;
+            const userData = msg.data?.user
 
             const updateReadDate = async () => {
                 try {
@@ -113,6 +114,12 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             await db.chatlist.update(chat.id, updateData);
                         }
                     });
+                    // 3 Update user's unread_messages count in IndexedDB
+                    if (userData?.id && typeof userData?.unread_messages === 'number') {
+                        await db.user.update(userData.id, {
+                            unread_messages: userData.unread_messages,
+                        });
+                    }
                 } catch (error) {
                     console.error("Failed to update read date via WS", error);
                 }
@@ -247,6 +254,10 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
 
                     if (directMessageId) {
                         const directChatMessage = message as DirectMessageChats;
+                        if (!directChatMessage.id) {
+                            console.warn("Received direct message without ID:", directChatMessage);
+                            return;
+                        }
                         const existing = await db.directmessagechats.get(directChatMessage.id);
                         const chat = await db.chatlist.filter(c =>
                             (c.direct_message?.id === directMessageId)
@@ -258,12 +269,15 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         }
                     } else if (groupChatId) {
                         const groupChatMessage = message as GroupMessageChats;
+                        if (!groupChatMessage.id) {
+                            console.warn("Received group message without ID:", groupChatMessage);
+                            return;
+                        }
                         const existing = await db.groupmessagechats.get(groupChatMessage.id);
                         const chat = await db.chatlist.filter(c =>
                             (c.group_chat?.id === groupChatId)
                         ).first();
                         if (!existing && chat) {
-                            alert("asdjkasdad")
                             await db.groupmessagechats.put(
                                 groupChatMessage,
                             );

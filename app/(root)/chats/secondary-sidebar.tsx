@@ -472,7 +472,7 @@ export const SecondarySidebar = () => {
                                             <span className="inline-flex absolute space-x-3">
                                               {chat.group_chat.receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.group_chat.receipt === "delivered" ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
                                             </span>
-                                            <span className="pl-4.5">You:{" "}</span>
+                                            <span className="pl-5">You:{" "}</span>
                                           </>) : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)
                                       )}
                                       <span>{chat.group_chat.recent_content}</span>
