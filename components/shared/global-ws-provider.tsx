@@ -6,7 +6,7 @@ import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
 import { useTypingStore, userTypingType } from "@/lib/stores/typing-store";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
-import { Chat, DirectMessageChats, GroupMessageChats } from "@/types";
+import { Chat, DirectMessageChats, GroupMessageChats, User } from "@/types";
 
 /**
  * GlobalWsProvider
@@ -258,6 +258,13 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             console.warn("Received direct message without ID:", directChatMessage);
                             return;
                         }
+
+                        // Clean up any optimistic messages that match the content and user
+                        await db.directmessagechats
+                            .where('direct_message_id').equals(directMessageId)
+                            .and(m => m.user === currentUser?.id && m.isOptimistic === true && m.content === directChatMessage.content)
+                            .delete();
+
                         const existing = await db.directmessagechats.get(directChatMessage.id);
                         const chat = await db.chatlist.filter(c =>
                             (c.direct_message?.id === directMessageId)
@@ -273,6 +280,13 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             console.warn("Received group message without ID:", groupChatMessage);
                             return;
                         }
+
+                        // Clean up any optimistic messages that match the content and user
+                        await db.groupmessagechats
+                            .where('groupchat_id').equals(groupChatId)
+                            .and(m => (m.user as User)?.id === currentUser?.id && m.isOptimistic === true && m.content === groupChatMessage.content)
+                            .delete();
+
                         const existing = await db.groupmessagechats.get(groupChatMessage.id);
                         const chat = await db.chatlist.filter(c =>
                             (c.group_chat?.id === groupChatId)

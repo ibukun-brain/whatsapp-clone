@@ -3,7 +3,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone } from "@/lib/utils";
 import { DirectMessageChats, GroupMessageChats, User } from "@/types";
 
-const ReadReceipt = ({ read_date, delivered_date, receipt }: { read_date?: Date, delivered_date?: Date, receipt?: "sent" | "delivered" | "read" }) => {
+const ReadReceipt = ({ read_date, delivered_date, receipt, isOptimistic }: { read_date?: Date, delivered_date?: Date, receipt?: "sent" | "delivered" | "read", isOptimistic?: boolean }) => {
+    if (isOptimistic) {
+        return <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />;
+    }
     return (
         read_date || receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : delivered_date && !read_date || receipt === "delivered" ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" /> : <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />
     )
@@ -134,7 +137,7 @@ const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg:
                     {/* Timestamp + read receipts */}
                     <div className="flex items-center justify-end gap-1 -mt-3 float-right ml-2">
                         <span className="text-[11px] text-[#667781]">{time}</span>
-                        {isDM && isMine && <ReadReceipt read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} />}
+                        {isDM && isMine && <ReadReceipt isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} />}
                     </div>
                     <div className="clear-both" />
                 </div>
@@ -244,7 +247,7 @@ const MessageBubble = ({ msg, currentUser, isDM, isConsecutive = false }: { msg:
                     {/* Timestamp + read receipts */}
                     <div className="flex items-center justify-end gap-1 -mt-3 float-right ml-2">
                         <span className="text-[11px] text-[#667781]">{time}</span>
-                        {isMine && <ReadReceipt receipt={(msg as GroupMessageChats).receipt} />}
+                        {isMine && <ReadReceipt isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />}
                     </div>
                     <div className="clear-both" />
                 </div>

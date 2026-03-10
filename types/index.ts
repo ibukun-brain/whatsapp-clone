@@ -110,6 +110,7 @@ export type DirectMessageChats = {
   edited: boolean;
   deleted: boolean;
   timestamp: Date;
+  isOptimistic?: boolean;
 }
 
 export type DMGroupsInCommon = Omit<GroupChat, "bio" | "created_at" | "settings"> & {
@@ -142,8 +143,9 @@ export type GroupMessageChats = {
   forwarded: boolean,
   edited: boolean,
   deleted: boolean,
-  timestamp: Date
-  receipt: "sent" | "delivered" | "read"
+  timestamp: Date;
+  receipt: "sent" | "delivered" | "read";
+  isOptimistic?: boolean;
 }
 
 export type GroupMessageChatsResults = {

@@ -74,11 +74,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         async () => await db.user.toCollection().first()
     );
     const directMessageChats = useLiveQuery(
-        () => db.directmessagechats.filter(message => message.direct_message_id === chatId).sortBy('timestamp'),
+        () => db.directmessagechats.where('direct_message_id').equals(chatId).sortBy('timestamp'),
         [chatId]
     );
     const groupMessageChats = useLiveQuery(
-        () => db.groupmessagechats.filter(message => message.groupchat_id === chatId).sortBy('timestamp'),
+        () => db.groupmessagechats.where('groupchat_id').equals(chatId).sortBy('timestamp'),
         [chatId]
     );
 
@@ -87,6 +87,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [groupInfo, setGroupInfo] = React.useState<GroupChatDetail>()
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
     const [hasText, setHasText] = React.useState(false);
+    const [localOptimisticMessages, setLocalOptimisticMessages] = React.useState<(DirectMessageChats | GroupMessageChats)[]>([]);
 
     // ── Draft ─────────────────────────────────────────────────────────
     // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
@@ -154,15 +155,39 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
 
         if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
-            db.directmessagechats.put(msg.data as DirectMessageChats);
+            const incomingMsg = msg.data as DirectMessageChats;
+            // Clear local optimistic state if matches
+            setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
+            // Clean up any optimistic messages in DB that match the content and user
+            db.directmessagechats
+                .where('direct_message_id').equals(chatId)
+                .and(m => m.user === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content)
+                .delete()
+                .then(() => {
+                    db.directmessagechats.put(incomingMsg);
+                });
             return;
         }
 
         if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
-            db.groupmessagechats.put(msg.data as GroupMessageChats);
+            const incomingMsg = msg.data as GroupMessageChats;
+            // Clear local optimistic state if matches
+            setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
+            // Clean up any optimistic messages in DB that match the content and user
+            db.groupmessagechats
+                .where('groupchat_id').equals(chatId)
+                .and(m => (m.user as User)?.id === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content)
+                .delete()
+                .then(() => {
+                    db.groupmessagechats.put(incomingMsg);
+                });
             return;
         }
-    }, [lastChatMessage]);
+        // Clear local optimistic messages when switching chats
+        React.useEffect(() => {
+            setLocalOptimisticMessages([]);
+        }, [chatId]);
+    }, [lastChatMessage, chatId, currentUser]);
 
     // DMs: any entry in the array means the other person is typing
     const isTyping = directMessage ? typingUsers.length > 0 : false;
@@ -190,9 +215,59 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
     }, [currentUser, chatType, chatId, globalSendMessage]);
 
-    const handleSendMessage = useCallback(() => {
+    const handleSendMessage = useCallback(async () => {
         const text = inputRef.current?.value.trim();
-        if (!text) return;
+        if (!text || !currentUser) return;
+
+        // Create optimistic message
+        const timestamp = new Date();
+        const tempId = `temp-${Date.now()}`;
+
+        let optimisticMsg: DirectMessageChats | GroupMessageChats;
+
+        if (chatType === "directmessage") {
+            optimisticMsg = {
+                id: tempId,
+                direct_message_id: chatId,
+                user: currentUser.id,
+                reply: null,
+                content: text,
+                files: [],
+                type: "text",
+                depth: null,
+                timestamp: timestamp,
+                isOptimistic: true,
+                forwarded: false,
+                edited: false,
+                deleted: false,
+            };
+            // Add to local state IMMEDIATELY for zero latency
+            setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
+            // Still save to DB for background persistence
+            db.directmessagechats.put(optimisticMsg as DirectMessageChats);
+        } else {
+            optimisticMsg = {
+                id: tempId,
+                groupchat_id: chatId,
+                user: currentUser,
+                type: "text",
+                contact_name: currentUser.display_name,
+                reply: null,
+                content: text,
+                files: [] as any,
+                depth: null,
+                forwarded: false,
+                edited: false,
+                deleted: false,
+                timestamp: timestamp,
+                receipt: "sent",
+                isOptimistic: true,
+            };
+            // Add to local state IMMEDIATELY for zero latency
+            setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
+            // Still save to DB for background persistence
+            db.groupmessagechats.put(optimisticMsg as GroupMessageChats);
+        }
 
         sendChatMessage({
             type: chatType,
@@ -212,8 +287,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
         // Clear draft from IndexedDB immediately on send
         const activeChatItem = directMessage ?? groupMessage;
-        if (activeChatItem) db.chatlist.update(activeChatItem.id, { draft: null });
-    }, [sendChatMessage, stopTyping, directMessage, groupMessage]);
+        if (activeChatItem) await db.chatlist.update(activeChatItem.id, { draft: null });
+    }, [sendChatMessage, stopTyping, directMessage, groupMessage, chatType, chatId, currentUser]);
 
     const handleTyping = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
         // Send message on Enter
@@ -424,13 +499,27 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
                     >
                         {/* direct message chats */}
-                        {currentUser && directMessageChats && directMessageChats.length > 0 && (() => {
+                        {currentUser && (() => {
+                            const dbMessages = directMessageChats || [];
+                            const combined = [...dbMessages];
+
+                            localOptimisticMessages.forEach(optMsg => {
+                                if ('direct_message_id' in optMsg && optMsg.direct_message_id === chatId) {
+                                    const exists = dbMessages.some(m => m.content === optMsg.content && m.user === optMsg.user);
+                                    if (!exists) combined.push(optMsg as DirectMessageChats);
+                                }
+                            });
+
+                            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                            if (combined.length === 0) return null;
+
                             let lastDateLabel = "";
-                            const unreadMessages = directMessageChats.filter(msg => msg.user !== currentUser.id && !msg.read_date);
+                            const unreadMessages = combined.filter(msg => msg.user !== currentUser.id && !msg.read_date);
                             const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
 
-                            return directMessageChats?.map((msg, index) => {
-                                const prevMsg = index > 0 ? directMessageChats[index - 1] : null;
+                            return combined.map((msg, index) => {
+                                const prevMsg = index > 0 ? combined[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                 const showSeparator = dateLabel !== lastDateLabel;
                                 if (showSeparator) lastDateLabel = dateLabel;
@@ -446,13 +535,27 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         })()}
 
                         {/* group message chats */}
-                        {currentUser && groupMessageChats && groupMessageChats.length > 0 && (() => {
+                        {currentUser && (() => {
+                            const dbMessages = groupMessageChats || [];
+                            const combined = [...dbMessages];
+
+                            localOptimisticMessages.forEach(optMsg => {
+                                if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
+                                    const exists = dbMessages.some(m => m.content === optMsg.content && (m.user as User)?.id === (optMsg.user as User)?.id);
+                                    if (!exists) combined.push(optMsg as GroupMessageChats);
+                                }
+                            });
+
+                            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                            if (combined.length === 0) return null;
+
                             let lastDateLabel = "";
-                            const unreadMessages = groupMessageChats.filter(msg => (msg.user as User)?.id !== currentUser.id && msg.receipt !== "read");
+                            const unreadMessages = combined.filter(msg => (msg.user as User)?.id !== currentUser.id && msg.receipt !== "read");
                             const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
 
-                            return groupMessageChats?.map((msg, index) => {
-                                const prevMsg = index > 0 ? groupMessageChats[index - 1] : null;
+                            return combined.map((msg, index) => {
+                                const prevMsg = index > 0 ? combined[index - 1] : null;
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                 const showSeparator = dateLabel !== lastDateLabel;
                                 if (showSeparator) lastDateLabel = dateLabel;
