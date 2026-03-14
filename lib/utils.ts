@@ -16,10 +16,12 @@ export function cn(...inputs: ClassValue[]) {
  * Humanizes a date based on the following criteria:
  * - If the date is today: show only the time (e.g., "01:30 AM")
  * - If the date is yesterday: show "Yesterday"
+ * @param datetime - The Date object or ISO string to format.
+ * @param userTimezone - An IANA timezone string (e.g., "Africa/Lagos", "America/New_York").
  * - Otherwise: show the date (e.g., "02/06/2026")
  */
-export function humanizeDate(date: Date | string): string {
-  const inputDate = typeof date === "string" ? new Date(date) : date;
+export function humanizeDate(datetime: Date | string, userTimezone: string): string {
+  const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
   const now = new Date();
 
   // Get start of today (midnight)
@@ -32,6 +34,7 @@ export function humanizeDate(date: Date | string): string {
   // Check if the date is today
   if (inputDate >= startOfToday) {
     return inputDate.toLocaleTimeString("en-US", {
+      timeZone: userTimezone,
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
@@ -45,6 +48,7 @@ export function humanizeDate(date: Date | string): string {
 
   // Otherwise, return the formatted date
   return inputDate.toLocaleDateString("en-US", {
+    timeZone: userTimezone,
     month: "2-digit",
     day: "2-digit",
     year: "numeric",

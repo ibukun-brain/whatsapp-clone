@@ -143,7 +143,7 @@ const Signup = ({ login }: { login: () => void }) => {
         } else {
           setStep("name");
         }
-      } catch (error) {
+      } catch (error: any) {
         setPhoneError(error?.response?.data?.message || "Failed to verify phone number. Please try again.");
       } finally {
         setIsCheckingPhone(false);

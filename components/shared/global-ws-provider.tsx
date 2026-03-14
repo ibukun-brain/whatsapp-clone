@@ -41,7 +41,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
     // Handle all incoming messages on the global socket
     React.useEffect(() => {
         if (!lastJsonMessage) return;
-        console.log("[global-ws]", lastJsonMessage)
+        // console.log("[global-ws]", lastJsonMessage)
         const msg = lastJsonMessage as {
             type?: string;
             data?: {
@@ -61,6 +61,14 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                 groupchat_id?: string,
                 read_date?: Date,
                 message?: DirectMessageChats | GroupMessageChats
+                dm_delivery_broadcast?: {
+                    "direct_message_id": string,
+                    "delivered_date": Date,
+                }[],
+                groupchat_message_receipt?: {
+                    "chatgroupmessage_id": string,
+                    "receipt": "sent" | "delivered" | "read",
+                }[]
             };
             chat?: Chat; // Handle cases where chat is at root
             // Typing indicator fields
@@ -71,6 +79,103 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             userTyping?: userTypingType[]; // groupchat
         };
 
+        if (msg.type === "message_delivery_broadcast") {
+            const dm_delivery_broadcasts = msg.data?.dm_delivery_broadcast!;
+            const groupchat_message_receipt = msg.data?.groupchat_message_receipt!;
+            console.log(groupchat_message_receipt, "groupchat_message_reciept")
+
+            if (groupchat_message_receipt.length > 0) {
+                // Update the delivery date (receipt) of the message
+                const updateGroupChatMessageReceipt = async () => {
+                    try {
+                        await db.transaction('rw', db.groupmessagechats, db.chatlist, async () => {
+                            const updateDeliveredReceipt = async () => {
+                                try {
+                                    await db.transaction('rw', db.groupmessagechats, db.chatlist, async () => {
+                                        for (const { chatgroupmessage_id, receipt } of groupchat_message_receipt) {
+                                            // get direct_message by id
+                                            const messagesToUpdate = await db.groupmessagechats
+                                                .filter(m => m.id === chatgroupmessage_id && currentUser?.id === m.user?.id && m.receipt !== "delivered")
+                                                .toArray();
+                                            // Update directmessages to delivered
+                                            for (const message of messagesToUpdate) {
+                                                await db.groupmessagechats.update(message.id, {
+                                                    receipt: receipt
+                                                });
+                                                // Update chatlist recent message delivered_date
+                                                const chat = await db.chatlist.filter(c => c.group_chat?.recent_content_id === chatgroupmessage_id).first();
+                                                if (chat?.group_chat) {
+                                                    await db.chatlist.update(chat.id, {
+                                                        group_chat: {
+                                                            ...chat.group_chat,
+                                                            receipt: receipt
+                                                        }
+                                                    });
+                                                }
+
+                                            }
+                                        }
+                                    });
+                                } catch (error) {
+                                    console.error("Failed to update delivered date via WS", error);
+                                }
+                            };
+                            updateDeliveredReceipt();
+                        });
+                    } catch (error) {
+                        console.error("Failed to update delivered date via WS", error);
+                    }
+                };
+                updateGroupChatMessageReceipt();
+            }
+
+
+            if (dm_delivery_broadcasts.length > 0) {
+                // Update the delivery date of the message
+                const updateDirectMessageDeliveredDates = async () => {
+                    try {
+                        await db.transaction('rw', db.directmessagechats, db.chatlist, async () => {
+                            const updateDeliveredDates = async () => {
+                                try {
+                                    await db.transaction('rw', db.directmessagechats, db.chatlist, async () => {
+                                        for (const { direct_message_id, delivered_date } of dm_delivery_broadcasts) {
+                                            // get direct_message by id
+                                            const messagesToUpdate = await db.directmessagechats
+                                                .filter(m => m.direct_message_id === direct_message_id && !m.delivered_date)
+                                                .toArray();
+                                            // Update directmessages to delivered
+                                            for (const message of messagesToUpdate) {
+                                                await db.directmessagechats.update(message.id, {
+                                                    delivered_date: delivered_date ? new Date(delivered_date) : new Date()
+                                                });
+                                                // Update chatlist recent message delivered_date
+                                                const chat = await db.chatlist.filter(c => c.direct_message?.id === direct_message_id).first();
+                                                if (chat?.direct_message) {
+                                                    await db.chatlist.update(chat.id, {
+                                                        direct_message: {
+                                                            ...chat.direct_message,
+                                                            delivered_date: delivered_date ? new Date(delivered_date) : new Date()
+                                                        }
+                                                    });
+                                                }
+
+                                            }
+                                        }
+                                    });
+                                } catch (error) {
+                                    console.error("Failed to update delivered date via WS", error);
+                                }
+                            };
+                            updateDeliveredDates();
+                        });
+                    } catch (error) {
+                        console.error("Failed to update delivered date via WS", error);
+                    }
+                };
+                updateDirectMessageDeliveredDates();
+            }
+        }
+
         if (msg.type === "dm_chat_message_read" && msg.data?.read && msg.data?.direct_message_id) {
             const { direct_message_id, read_by, read_date } = msg.data;
             const isMe = read_by === currentUser?.id;
@@ -79,19 +184,17 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             const updateReadDate = async () => {
                 try {
                     // 1. Update directmessagechats table
-                    if (!isMe) {
-                        await db.transaction('rw', db.directmessagechats, async () => {
-                            const messagesToUpdate = await db.directmessagechats
-                                .filter(m => m.direct_message_id === direct_message_id && m.user !== read_by && !m.read_date)
-                                .toArray();
+                    await db.transaction('rw', db.directmessagechats, async () => {
+                        const messagesToUpdate = await db.directmessagechats
+                            .filter(m => m.direct_message_id === direct_message_id && m.user !== read_by && !m.read_date)
+                            .toArray();
 
-                            for (const message of messagesToUpdate) {
-                                await db.directmessagechats.update(message.id, {
-                                    read_date: read_date ? new Date(read_date) : new Date()
-                                });
-                            }
-                        });
-                    }
+                        for (const message of messagesToUpdate) {
+                            await db.directmessagechats.update(message.id, {
+                                read_date: read_date ? new Date(read_date) : new Date()
+                            });
+                        }
+                    });
 
                     // 2. Update chatlist table
                     await db.transaction('rw', db.chatlist, async () => {
@@ -151,19 +254,24 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                     console.error("Failed to update online status", error);
                 }
             };
-            updateOnlineStatus();
-
             // send an event to set every unread messages o delivered status when the user is online
-            if (currentUser?.id !== user_id) {
-                // only send this event if currentuser is not the online user
+            // only send this event if currentuser is not the online user
+            const fetchUnreadMessages = async () => {
+                const unreadGroupChatMessage = await db.groupmessagechats.filter((message) => message.receipt === "sent" && !message.isOptimistic).toArray()
+                const unreadGroupChatMessageIds = unreadGroupChatMessage.map((message) => message.id)
                 sendJsonMessage({
                     type: "send_chat_message_delivery_broadcast",
                     data: {
-                        onlineUserId: user_id
+                        onlineUserId: user_id,
+                        unreadGroupChatMessageIds
+                        // i might as well send the chatMessage ids of the dm messages or group messages
                     }
 
                 })
             }
+
+            updateOnlineStatus();
+            fetchUnreadMessages()
 
         }
 

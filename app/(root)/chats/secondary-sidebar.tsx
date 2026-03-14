@@ -485,7 +485,7 @@ export const SecondarySidebar = () => {
                         </div>
                       </div>
                       <div className="ml-auto text-xs">
-                        <p>{humanizeDate(chat.timestamp)}</p>
+                        <p>{humanizeDate(chat.timestamp, currentUser?.timezone!)}</p>
                         <div className="flex justify-end mt-2 space-x-3">
                           {chat?.isPinned && <PinIcon />}
                           {chat?.direct_message && (

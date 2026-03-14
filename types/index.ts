@@ -36,6 +36,7 @@ export type DirectMessage = {
   delivered_date: Date | null;
   read_date: Date | null;
   recent_content: string;
+  recent_content_id: string;
   unread_messages: number;
   last_seen: Date | null;
   is_online?: boolean;
@@ -49,6 +50,7 @@ export type GroupChat = {
   recent_user_id: string;
   recent_user_display_name: string;
   recent_content: string;
+  recent_content_id: string;
   unread_messages: number;
   online_users?: number;
   // Add other group chat properties as needed

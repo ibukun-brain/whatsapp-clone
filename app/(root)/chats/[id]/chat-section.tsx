@@ -20,6 +20,8 @@ import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
 import { useTypingStore, EMPTY_TYPING } from "@/lib/stores/typing-store";
 import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
+import { useUnreadMessages } from "@/hooks/use-unread-messages";
+import { useScrollManager } from "@/hooks/use-scroll-manager";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -99,11 +101,36 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // re-populating the input on every chatItem update (e.g. during typing saves).
     const draftRestoredForRef = useRef<string | null>(null);
 
-    // ── Scroll management ─────────────────────────────────────────────
-    // Anchor div at the very bottom of the message list
-    const bottomAnchorRef = useRef<HTMLDivElement>(null);
-    const unreadBannerRef = useRef<HTMLDivElement>(null);
-    const hasScrolledToUnreadRef = useRef<string | null>(null);
+    // ── Determine chat type ──────────────────────────────────────────
+    const chatType = groupMessage ? "groupchat" : "directmessage";
+
+    // ── Unread Messages Hook ─────────────────────────────────────────
+    const {
+        unreadState,
+        scrollToFirstUnread,
+        bannerRef: unreadBannerRef,
+        isUnreadBannerVisible,
+    } = useUnreadMessages({
+        chatId,
+        currentUserId: currentUser?.id,
+        chatType: chatType as "directmessage" | "groupchat",
+    });
+
+    // ── Scroll Manager Hook ──────────────────────────────────────────
+    const messages = chatType === "groupchat" ? groupMessageChats : directMessageChats;
+    const messagesLength = (messages?.length ?? 0) + localOptimisticMessages.length;
+
+    const {
+        scrollContainerRef,
+        bottomAnchorRef,
+        handleScroll,
+        scrollToBottom,
+    } = useScrollManager({
+        chatId,
+        messagesLength,
+        scrollToFirstUnread,
+        hasUnreadBanner: isUnreadBannerVisible,
+    });
 
     // ── WebSocket (per-chat) ──────────────────────────────────────────
     // Handles send / edit / delete / reply for THIS chat only.
@@ -183,20 +210,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 });
             return;
         }
-        // Clear local optimistic messages when switching chats
-        React.useEffect(() => {
-            setLocalOptimisticMessages([]);
-        }, [chatId]);
     }, [lastChatMessage, chatId, currentUser]);
+
+    // Clear local optimistic messages when switching chats
+    React.useEffect(() => {
+        setLocalOptimisticMessages([]);
+    }, [chatId]);
 
     // DMs: any entry in the array means the other person is typing
     const isTyping = directMessage ? typingUsers.length > 0 : false;
 
-    // Determine chat type based on which chat is active
-    const chatType = groupMessage ? "groupchat" : "directmessage";
-
     // Ref for the message input element
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
 
     // Debounce ref: clears and resets a timer on every keystroke
     const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -278,7 +303,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         // Clear input, draft, and stop typing indicator
-        if (inputRef.current) inputRef.current.value = "";
+        if (inputRef.current) {
+            inputRef.current.value = "";
+            inputRef.current.style.height = "auto";
+        }
         setHasText(false);
         stopTyping();
 
@@ -288,11 +316,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         // Clear draft from IndexedDB immediately on send
         const activeChatItem = directMessage ?? groupMessage;
         if (activeChatItem) await db.chatlist.update(activeChatItem.id, { draft: null });
-    }, [sendChatMessage, stopTyping, directMessage, groupMessage, chatType, chatId, currentUser]);
 
-    const handleTyping = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-        // Send message on Enter
-        if (e.key === "Enter") {
+        // Scroll to bottom after sending
+        scrollToBottom();
+    }, [sendChatMessage, stopTyping, directMessage, groupMessage, chatType, chatId, currentUser, scrollToBottom]);
+
+    const handleTyping = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Enter sends, Shift+Enter inserts a new line
+        if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
             return;
@@ -352,11 +383,15 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     chatItemIdRef.current = chatItem?.id;
 
     // ─── Draft: input change handler (debounced save to DB) ───────────────────
-    // ─── Draft: input change handler (debounced save to DB) ───────────────────
-    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const text = e.target.value;
         currentInputValueRef.current = text;
         setHasText(text.length > 0);
+
+        // Auto-resize textarea
+        const textarea = e.target;
+        textarea.style.height = "auto";
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
 
         // Mark as sourced/dirty so the flush logic knows we have a value worth saving.
         draftRestoredForRef.current = chatId;
@@ -393,17 +428,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             draftRestoredForRef.current = null;
         };
     }, [chatId]);
-
-    // ─── Scroll: always stay at the bottom ──────────────────────────────────
-    const messages = directMessageChats ?? groupMessageChats;
-    useEffect(() => {
-        if (unreadBannerRef.current && hasScrolledToUnreadRef.current !== chatId) {
-            unreadBannerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-            hasScrolledToUnreadRef.current = chatId;
-        } else {
-            bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
-        }
-    }, [messages, chatId]);
 
     React.useEffect(() => {
         if (groupMessage && currentUser) {
@@ -496,6 +520,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                     {/* ── Messages Area ───────────────────────────────────── */}
                     <div
+                        ref={scrollContainerRef}
+                        onScroll={handleScroll}
                         className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
                     >
                         {/* direct message chats */}
@@ -514,9 +540,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                             if (combined.length === 0) return null;
 
+                            const firstUnreadId = unreadState.firstUnreadId;
+                            const unreadCount = unreadState.unreadCount;
+
                             let lastDateLabel = "";
-                            const unreadMessages = combined.filter(msg => msg.user !== currentUser.id && !msg.read_date);
-                            const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
 
                             return combined.map((msg, index) => {
                                 const prevMsg = index > 0 ? combined[index - 1] : null;
@@ -526,7 +553,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                 return (
                                     <React.Fragment key={msg.id}>
-                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadMessages.length} ref={unreadBannerRef} />}
+                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                         {showSeparator && <DateSeparator label={dateLabel} />}
                                         <MessageBubble msg={msg} currentUser={currentUser} isDM={true} isConsecutive={isConsecutive} />
                                     </React.Fragment>
@@ -550,9 +577,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                             if (combined.length === 0) return null;
 
+                            const firstUnreadId = unreadState.firstUnreadId;
+                            const unreadCount = unreadState.unreadCount;
+
                             let lastDateLabel = "";
-                            const unreadMessages = combined.filter(msg => (msg.user as User)?.id !== currentUser.id && msg.receipt !== "read");
-                            const firstUnreadId = unreadMessages.length > 0 ? unreadMessages[0].id : null;
 
                             return combined.map((msg, index) => {
                                 const prevMsg = index > 0 ? combined[index - 1] : null;
@@ -562,8 +590,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 const isConsecutive = !showSeparator && (prevMsg?.user as User)?.id === (msg.user as User)?.id;
                                 return (
                                     <React.Fragment key={msg.id}>
+                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadMessages.length} ref={unreadBannerRef} />}
                                         <MessageBubble msg={msg} currentUser={currentUser} isDM={false} isConsecutive={isConsecutive} />
                                     </React.Fragment>
                                 );
@@ -617,11 +645,12 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                         {/* Text Input */}
                         <div className="flex-1">
-                            <input
+                            <textarea
                                 ref={inputRef}
-                                type="text"
+                                rows={1}
                                 placeholder="Type a message"
-                                className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none"
+                                className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
+                                style={{ maxHeight: 120, overflow: "hidden" }}
                                 onChange={handleInputChange}
                                 onKeyDown={handleTyping}
                             />
