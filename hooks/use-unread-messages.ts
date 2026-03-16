@@ -25,14 +25,17 @@ export function useUnreadMessages({
     chatId,
     currentUserId,
     chatType,
+    externalUnreadCount,
 }: {
     chatId: string;
     currentUserId: string | undefined;
-    chatType: "directmessage" | "groupchat";
+    chatType: "directmessage" | "groupchat" | null | undefined;
+    externalUnreadCount?: number;
 }) {
     // Freeze the unread state per chatId — only compute once per visit
     const frozenUnreadRef = useRef<{
         chatId: string;
+        chatType: string;
         state: UnreadState;
     } | null>(null);
 
@@ -45,9 +48,9 @@ export function useUnreadMessages({
         () =>
             chatType === "directmessage"
                 ? db.directmessagechats
-                      .where("direct_message_id")
-                      .equals(chatId)
-                      .sortBy("timestamp")
+                    .where("direct_message_id")
+                    .equals(chatId)
+                    .sortBy("timestamp")
                 : [],
         [chatId, chatType]
     );
@@ -56,18 +59,26 @@ export function useUnreadMessages({
         () =>
             chatType === "groupchat"
                 ? db.groupmessagechats
-                      .where("groupchat_id")
-                      .equals(chatId)
-                      .sortBy("timestamp")
+                    .where("groupchat_id")
+                    .equals(chatId)
+                    .sortBy("timestamp")
                 : [],
         [chatId, chatType]
     );
-
     // Compute the unread state — frozen on first computation per chatId
     const unreadState = useMemo<UnreadState>(() => {
-        // If we already computed for this chatId, return frozen value
-        if (frozenUnreadRef.current?.chatId === chatId) {
+        // If we already computed for this chatId and type, return frozen value
+        if (
+            frozenUnreadRef.current?.chatId === chatId &&
+            frozenUnreadRef.current?.chatType === chatType
+        ) {
             return frozenUnreadRef.current.state;
+        }
+
+        // If explicitly read (count 0) and we haven't frozen a banner yet,
+        // don't bother searching or showing a banner.
+        if (externalUnreadCount === 0) {
+            return { firstUnreadId: null, unreadCount: 0 };
         }
 
         if (!currentUserId) return { firstUnreadId: null, unreadCount: 0 };
@@ -82,22 +93,32 @@ export function useUnreadMessages({
             firstUnreadId = unread.length > 0 ? unread[0].id : null;
             unreadCount = unread.length;
         } else if (chatType === "groupchat" && groupMessages !== undefined) {
-            const unread = groupMessages.filter(
-                (msg) =>
-                    (msg.user as User)?.id !== currentUserId &&
-                    msg.receipt !== "read"
-            );
+            const unread = groupMessages.filter((msg) => {
+                const msgUserId =
+                    typeof msg.user === "object" && msg.user !== null
+                        ? (msg.user as User).id
+                        : (msg.user as unknown as string);
+                return msgUserId !== currentUserId && msg.receipt !== "read";
+            });
             firstUnreadId = unread.length > 0 ? unread[0].id : null;
             unreadCount = unread.length;
         } else {
-            // Data not loaded yet — don't freeze
+            // Data not loaded yet (or chatType is null/undefined while loading) — don't freeze
             return { firstUnreadId: null, unreadCount: 0 };
         }
 
         const state = { firstUnreadId, unreadCount };
-        frozenUnreadRef.current = { chatId, state };
+        // Only freeze if we found unread messages. If 0, keep filtering
+        // so we catch up if background sync fills the IndexedDB later.
+        if (state.unreadCount > 0) {
+            frozenUnreadRef.current = {
+                chatId,
+                chatType: chatType as string,
+                state,
+            };
+        }
         return state;
-    }, [chatId, currentUserId, chatType, dmMessages, groupMessages]);
+    }, [chatId, currentUserId, chatType, dmMessages, groupMessages, externalUnreadCount]);
 
     // ── Scroll to first unread message ────────────────────────────────
     const scrollToFirstUnread = useCallback(
@@ -122,8 +143,12 @@ export function useUnreadMessages({
         []
     );
 
-    // Reset frozen state when chatId changes
-    if (frozenUnreadRef.current && frozenUnreadRef.current.chatId !== chatId) {
+    // Reset frozen state when chatId OR chatType changes
+    if (
+        frozenUnreadRef.current &&
+        (frozenUnreadRef.current.chatId !== chatId ||
+            frozenUnreadRef.current.chatType !== chatType)
+    ) {
         frozenUnreadRef.current = null;
     }
 

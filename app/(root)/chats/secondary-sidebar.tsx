@@ -162,7 +162,7 @@ export const SecondarySidebar = () => {
           axiosInstance.get<ContactResults>("/contacts/"),
           axiosInstance.get<Omit<UserSettings, "id">>("/users/usersettings/"),
           axiosInstance.get<DirectMessageChatsResults>("/directmessages/"),
-          axiosInstance.get<GroupMessageChatsResults>("/groups/all-chats/"),
+          axiosInstance.get<GroupMessageChatsResults>("/groups/all-messages/"),
         ]);
 
         // Store and Update User

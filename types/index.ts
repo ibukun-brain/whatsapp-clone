@@ -126,7 +126,12 @@ export type DMGroupsInCommonResults = {
 export type DirectMessageChatsResults = {
   results: DirectMessageChats[]
 }
-
+export type WSData = {
+  group_id: string,
+  groupchat_messages: GroupMessageChats,
+  groupchat_message_recipients: GroupMessageChatRecipients[]
+  online_users: number
+}
 export type GroupMessageChats = {
   id: string;
   groupchat_id: string;
@@ -148,6 +153,22 @@ export type GroupMessageChats = {
   timestamp: Date;
   receipt: "sent" | "delivered" | "read";
   isOptimistic?: boolean;
+}
+
+export type GroupMessageChatRecipients = {
+  id: string,
+  message_id: string,
+  receipt: "sent" | "delivered" | "read";
+  user: {
+    "id": string,
+    "profile_pic": string,
+    "bio": string,
+    "display_name": string,
+    "phone": string
+  },
+  contact_name: string,
+  read_date: Date,
+  delivered_date: Date
 }
 
 export type GroupMessageChatsResults = {

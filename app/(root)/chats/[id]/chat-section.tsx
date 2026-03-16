@@ -14,7 +14,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
 import { getDateLabel } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat } from "@/types";
+import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat, GroupMessageChatRecipients, WSData } from "@/types";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
@@ -102,9 +102,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const draftRestoredForRef = useRef<string | null>(null);
 
     // ── Determine chat type ──────────────────────────────────────────
-    const chatType = groupMessage ? "groupchat" : "directmessage";
+    const chatType = groupMessage ? "groupchat" : directMessage ? "directmessage" : null;
 
     // ── Unread Messages Hook ─────────────────────────────────────────
+    const chatItem = directMessage ?? groupMessage;
+    const externalUnreadCount = chatType === "groupchat"
+        ? chatItem?.group_chat?.unread_messages
+        : chatItem?.direct_message?.unread_messages;
+
     const {
         unreadState,
         scrollToFirstUnread,
@@ -114,6 +119,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         chatId,
         currentUserId: currentUser?.id,
         chatType: chatType as "directmessage" | "groupchat",
+        externalUnreadCount,
     });
 
     // ── Scroll Manager Hook ──────────────────────────────────────────
@@ -156,10 +162,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const msg = lastChatMessage as {
             type?: "directmessage" | "groupchat" | "group_online_users";
             action?: string;
-            data?: DirectMessageChats | GroupMessageChats | Chat | {
-                "group_id": string,
-                online_users: number
-            };
+            data?: DirectMessageChats | Chat | WSData;
             [key: string]: any;
         };
 
@@ -197,17 +200,25 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
 
         if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
-            const incomingMsg = msg.data as GroupMessageChats;
+            const incomingMsg = (msg.data as WSData).groupchat_messages
+            const recipients = (msg.data as WSData).groupchat_message_recipients
+            console.log(recipients, "recipients delivered")
             // Clear local optimistic state if matches
             setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
             // Clean up any optimistic messages in DB that match the content and user
             db.groupmessagechats
                 .where('groupchat_id').equals(chatId)
-                .and(m => (m.user as User)?.id === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content)
+                .and(m => {
+                    const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
+                    return mUserId === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content;
+                })
                 .delete()
                 .then(() => {
                     db.groupmessagechats.put(incomingMsg);
                 });
+            if (currentUser?.id === incomingMsg.user.id) {
+                db.groupmessagechatrecipients.bulkPut(recipients)
+            }
             return;
         }
     }, [lastChatMessage, chatId, currentUser]);
@@ -356,8 +367,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             });
         }, 1500);
     }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage]);
-
-    const chatItem = directMessage ?? groupMessage;
 
     // ─── Draft: restore when entering a chat ─────────────────────────────────
     // Depends on both chatId and chatItem so it retries once chatItem loads.
@@ -568,7 +577,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                             localOptimisticMessages.forEach(optMsg => {
                                 if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
-                                    const exists = dbMessages.some(m => m.content === optMsg.content && (m.user as User)?.id === (optMsg.user as User)?.id);
+                                    const exists = dbMessages.some(m => {
+                                        const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
+                                        const optUserId = typeof optMsg.user === 'object' && optMsg.user !== null ? (optMsg.user as User).id : (optMsg.user as unknown as string);
+                                        return m.content === optMsg.content && mUserId === optUserId;
+                                    });
                                     if (!exists) combined.push(optMsg as GroupMessageChats);
                                 }
                             });
@@ -587,7 +600,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                 const showSeparator = dateLabel !== lastDateLabel;
                                 if (showSeparator) lastDateLabel = dateLabel;
-                                const isConsecutive = !showSeparator && (prevMsg?.user as User)?.id === (msg.user as User)?.id;
+                                const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
+                                const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
+                                const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
                                 return (
                                     <React.Fragment key={msg.id}>
                                         {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
