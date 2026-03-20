@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AnimatePresence, motion } from "framer-motion"
 import { DirectMessageName, GroupMember } from "@/types"
-import { cn, formatLastSeen } from "@/lib/utils"
+import { cn, formatDatetime } from "@/lib/utils"
 
 type DirectMessageUserInfo = {
     name: DirectMessageName,
@@ -113,7 +113,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                             transition={{ duration: 0.2 }}
                                             className="absolute top-0 left-0 text-[12px] font-normal text-[#54656f] whitespace-nowrap"
                                         >
-                                            last seen {formatLastSeen(directMessageUserInfo.lastSeen, timezone)}
+                                            last seen {formatDatetime(directMessageUserInfo.lastSeen, timezone)}
                                         </motion.span>
                                     ) : null}
                                 </AnimatePresence>

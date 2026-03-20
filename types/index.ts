@@ -95,7 +95,18 @@ type MessageType =
   | "text"
   | "voice"
   | "emoji"
+  | "document"
   | "status-reply";
+
+export type Attachment = {
+  id: string;
+  file_url: string;
+  thumbnail_url: string | null;
+  file_name: string;
+  file_size: number;
+  file_type: string;
+  page_count: number;
+};
 
 export type DirectMessageChats = {
   id: string;
@@ -113,6 +124,7 @@ export type DirectMessageChats = {
   deleted: boolean;
   timestamp: Date;
   isOptimistic?: boolean;
+  attachments?: Attachment[];
 }
 
 export type DMGroupsInCommon = Omit<GroupChat, "bio" | "created_at" | "settings"> & {
@@ -153,6 +165,7 @@ export type GroupMessageChats = {
   timestamp: Date;
   receipt: "sent" | "delivered" | "read";
   isOptimistic?: boolean;
+  attachments?: Attachment[];
 }
 
 export type GroupMessageChatRecipients = {
@@ -167,7 +180,7 @@ export type GroupMessageChatRecipients = {
     "phone": string
   },
   contact_name: string,
-  read_date: Date,
+  read_date: Date | null,
   delivered_date: Date
 }
 

@@ -112,15 +112,18 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                                                 });
                                             }
                                             if (message.user.id == currentUser?.id) {
-                                                const existingRecipient = await db.groupmessagechatrecipients.filter(existingRecipient => existingRecipient.id === recipient.id).first()
+                                                const existingRecipient = await db.groupmessagechatrecipients.get(recipient.id);
                                                 if (existingRecipient) {
                                                     await db.groupmessagechatrecipients.update(existingRecipient.id, {
-                                                        ...existingRecipient,
-                                                        receipt: recipient.receipt
-                                                    })
+                                                        receipt: recipient.receipt,
+                                                        delivered_date: recipient.delivered_date ? new Date(recipient.delivered_date) : new Date()
+                                                    });
                                                 } else {
-                                                    await db.groupmessagechatrecipients.put(recipient)
-
+                                                    await db.groupmessagechatrecipients.put({
+                                                        ...recipient,
+                                                        delivered_date: recipient.delivered_date ? new Date(recipient.delivered_date) : new Date(),
+                                                        read_date: recipient.read_date ? new Date(recipient.read_date) : null
+                                                    });
                                                 }
                                             }
 
@@ -242,7 +245,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
         }
         if (msg.type === "groupchat_message_read" && msg.data?.recipients && msg.data?.groupchat_id) {
             const { recipients, groupchat_id, read_by } = msg.data;
-            const receipt = recipients[0].receipt
+            const receipt = recipients ? recipients[0].receipt : "sent"
             const userData = msg.data?.user
             const isMe = read_by === currentUser?.id;
             const updateReadDate = async () => {
@@ -259,15 +262,18 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                                     receipt: recipient.receipt
                                 });
                                 if (message.user.id === currentUser?.id) {
-                                    const existingRecipient = await db.groupmessagechatrecipients.filter(existingRecipient => existingRecipient.id === recipient.id).first()
+                                    const existingRecipient = await db.groupmessagechatrecipients.get(recipient.id);
                                     if (existingRecipient) {
                                         await db.groupmessagechatrecipients.update(existingRecipient.id, {
-                                            ...existingRecipient,
-                                            receipt: recipient.receipt
-                                        })
+                                            receipt: recipient.receipt,
+                                            read_date: recipient.read_date ? new Date(recipient.read_date) : new Date()
+                                        });
                                     } else {
-                                        await db.groupmessagechatrecipients.put(recipient)
-
+                                        await db.groupmessagechatrecipients.put({
+                                            ...recipient,
+                                            read_date: recipient.read_date ? new Date(recipient.read_date) : new Date(),
+                                            delivered_date: recipient.delivered_date ? new Date(recipient.delivered_date) : new Date()
+                                        });
                                     }
                                 }
                             }

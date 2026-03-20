@@ -21,7 +21,7 @@ export class WhatsappCloneDB extends Dexie {
             contact: 'id, contact_name, contact_phone_number', // contact id is primary key
             directmessagechats: 'id, timestamp, direct_message_id', // id is primary key
             groupmessagechats: 'id, timestamp, groupchat_id', // id is primary key
-            groupmessagechatrecipients: 'id, read_date, delivered_date', // id is primary key
+            groupmessagechatrecipients: 'id, message_id, read_date, delivered_date', // id is primary key
             groupmembers: 'id, groupchat_id', // id is primary key, indexed by group_id
             dmgroupincommon: '[direct_message_id+id]', // Compound primary key
         });

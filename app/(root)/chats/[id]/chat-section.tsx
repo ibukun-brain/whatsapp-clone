@@ -8,11 +8,13 @@ import {
     AttachmentPlusIcon,
     SendIcon,
 } from "@/components/icons/chats-icon";
+import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
-import { getDateLabel } from "@/lib/utils";
+import { formatDatetime, getDateLabel, getDateTimeByTimezone } from "@/lib/utils";
 import ChatHeader from "./chat-header";
 import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat, GroupMessageChatRecipients, WSData } from "@/types";
 import MessageBubble from "./message-bubble";
@@ -20,8 +22,11 @@ import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
 import { useTypingStore, EMPTY_TYPING } from "@/lib/stores/typing-store";
 import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
-import { useUnreadMessages } from "@/hooks/use-unread-messages";
 import { useScrollManager } from "@/hooks/use-scroll-manager";
+import { CheckIcon2 as CheckIcon2_ } from "@/components/icons/chats-icon";
+import { useUnreadMessages } from "@/hooks/use-unread-messages";
+import FileUploadPreview from "./file-upload-preview";
+import { uploadAttachment } from "@/lib/attachment-upload";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -85,11 +90,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     );
 
     const [isInfoOpen, setIsInfoOpen] = React.useState(false);
+    const [messageInfoMsg, setMessageInfoMsg] = React.useState<GroupMessageChats | null>(null);
     const [groupMembers, setGroupMembers] = React.useState<GroupMember[]>([])
     const [groupInfo, setGroupInfo] = React.useState<GroupChatDetail>()
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
     const [hasText, setHasText] = React.useState(false);
     const [localOptimisticMessages, setLocalOptimisticMessages] = React.useState<(DirectMessageChats | GroupMessageChats)[]>([]);
+    
+    // ── Upload ────────────────────────────────────────────────────────
+    const [pendingFiles, setPendingFiles] = React.useState<File[]>([]);
+    const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const mediaInputRef = useRef<HTMLInputElement>(null);
 
     // ── Draft ─────────────────────────────────────────────────────────
     // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
@@ -103,6 +115,30 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     // ── Determine chat type ──────────────────────────────────────────
     const chatType = groupMessage ? "groupchat" : directMessage ? "directmessage" : null;
+
+    const messageDeliveredRecipients = useLiveQuery<GroupMessageChatRecipients[]>(
+        () => {
+            if (!messageInfoMsg) return [];
+            return db.groupmessagechatrecipients
+                .where("message_id")
+                .equals(messageInfoMsg.id)
+                .and(r => r.receipt === "delivered")
+                .toArray();
+        },
+        [messageInfoMsg?.id]
+    );
+
+    const messageReadRecipients = useLiveQuery<GroupMessageChatRecipients[]>(
+        () => {
+            if (!messageInfoMsg) return [];
+            return db.groupmessagechatrecipients
+                .where("message_id")
+                .equals(messageInfoMsg.id)
+                .and(r => r.receipt === "read")
+                .toArray();
+        },
+        [messageInfoMsg?.id]
+    );
 
     // ── Unread Messages Hook ─────────────────────────────────────────
     const chatItem = directMessage ?? groupMessage;
@@ -217,7 +253,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     db.groupmessagechats.put(incomingMsg);
                 });
             if (currentUser?.id === incomingMsg.user.id) {
-                db.groupmessagechatrecipients.bulkPut(recipients)
+                db.groupmessagechatrecipients.bulkPut(recipients.map(r => ({
+                    ...r,
+                    delivered_date: new Date(r.delivered_date),
+                    read_date: r.read_date ? new Date(r.read_date) : null
+                })))
             }
             return;
         }
@@ -368,6 +408,48 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }, 1500);
     }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage]);
 
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length > 0) {
+            setPendingFiles(prev => [...prev, ...selectedFiles]);
+            setIsPreviewOpen(true);
+        }
+        e.target.value = "";
+    };
+
+    const handleSendFiles = async (files: File[], captions: Record<number, string>) => {
+        if (!currentUser) return;
+
+        try {
+            // Upload all files (PDF thumbnails generated automatically)
+            const uploadResults = await Promise.all(
+                files.map((file) => uploadAttachment(file))
+            );
+
+            console.log("Upload results:", uploadResults);
+            console.log("Captions:", captions);
+
+            // TODO: Send message with attachments via WS or HTTP
+            // The uploadResults array contains Attachment objects ready to attach to a message.
+            // Each caption is keyed by the file index: captions[0], captions[1], etc.
+        } catch (error) {
+            console.error("Failed to upload files:", error);
+        } finally {
+            setPendingFiles([]);
+            setIsPreviewOpen(false);
+        }
+    };
+
+    const handleRemoveFile = (index: number) => {
+        setPendingFiles(prev => {
+            const next = prev.filter((_, i) => i !== index);
+            if (next.length === 0) {
+                setIsPreviewOpen(false);
+            }
+            return next;
+        });
+    };
+
     // ─── Draft: restore when entering a chat ─────────────────────────────────
     // Depends on both chatId and chatItem so it retries once chatItem loads.
     useEffect(() => {
@@ -441,7 +523,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     React.useEffect(() => {
         if (groupMessage && currentUser) {
             const fetchGroupMembers = async () => {
-                let members = await db.groupmembers.where('groupchat_id').equals(chatId).toArray()
+                const members = await db.groupmembers.where('groupchat_id').equals(chatId).toArray()
                 if (members.length > 0) {
                     setGroupMembers(members.filter((member) => member.user?.id !== currentUser.id))
                     setGroupInfo(members[0].groupchat)
@@ -469,7 +551,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     React.useEffect(() => {
         if (directMessage && currentUser) {
             const fetchDMGroupsInCommon = async () => {
-                let dmGroupsInCommon = await db.dmgroupincommon.where('direct_message_id').equals(chatId).toArray()
+                const dmGroupsInCommon = await db.dmgroupincommon.where('direct_message_id').equals(chatId).toArray()
                 if (dmGroupsInCommon.length > 0) {
                     setDmGroupsInCommon(dmGroupsInCommon)
                 } else {
@@ -527,6 +609,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         timezone={currentUser?.timezone}
                     />
 
+                    {/* ── Messages + Footer + Upload Preview wrapper ── */}
+                    <div className="flex-1 flex flex-col relative overflow-hidden">
+
                     {/* ── Messages Area ───────────────────────────────────── */}
                     <div
                         ref={scrollContainerRef}
@@ -564,7 +649,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     <React.Fragment key={msg.id}>
                                         {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={true} isConsecutive={isConsecutive} />
+                                        <MessageBubble
+                                            msg={msg}
+                                            currentUser={currentUser}
+                                            isDM={true}
+                                            isConsecutive={isConsecutive}
+                                            onShowInfo={setMessageInfoMsg}
+                                        />
                                     </React.Fragment>
                                 );
                             });
@@ -607,7 +698,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     <React.Fragment key={msg.id}>
                                         {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                         {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble msg={msg} currentUser={currentUser} isDM={false} isConsecutive={isConsecutive} />
+                                        <MessageBubble
+                                            msg={msg}
+                                            currentUser={currentUser}
+                                            isDM={false}
+                                            isConsecutive={isConsecutive}
+                                            onShowInfo={setMessageInfoMsg}
+                                        />
                                     </React.Fragment>
                                 );
                             });
@@ -618,7 +715,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                     {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
                     {groupMessage && typingUsers.length > 0 && (
-                        <div className="flex items-end gap-1 px-4 pb-2">
+                        <div className="flex items-end gap-4 px-4 pb-3">
                             {/* Stacked mini avatars — up to 3 shown */}
                             <AvatarGroup>
                                 {typingUsers.slice(0, 3).map((u) => (
@@ -632,7 +729,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             </AvatarGroup>
 
                             {/* Typing bubble with three-dot bounce */}
-                            <div className="flex items-center gap-1 bg-white rounded-2xl rounded-tl-none px-3 py-2 shadow-sm">
+                            <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
                                 <span className="typing-dot typing-dot-1" />
                                 <span className="typing-dot typing-dot-2" />
                                 <span className="typing-dot typing-dot-3" />
@@ -640,15 +737,88 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         </div>
                     )}
 
+
+
                     {/* ── Input Bar ───────────────────────────────────────── */}
                     <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
                         {/* Plus (attach) */}
-                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                            <AttachmentPlusIcon
-                                style={{ width: "24px", height: "24px" }}
-                                className="text-[#54656f]"
-                            />
-                        </button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer outline-none">
+                                    <AttachmentPlusIcon
+                                        style={{ width: "24px", height: "24px" }}
+                                        className="text-[#54656f]"
+                                    />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                                side="top"
+                                align="start"
+                                className="mb-4 48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                            >
+                                <DropdownMenuItem
+                                    className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <FileText size={20} className="text-[#7f66ff]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Document</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem 
+                                    className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                    onClick={() => mediaInputRef.current?.click()}
+                                >
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <ImageIcon size={20} className="text-[#007bfc]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Photos & videos</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <Camera size={20} className="text-[#ff2e74]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Camera</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <Headphones size={20} className="text-[#ff7f35]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Audio</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <UserIcon size={20} className="text-[#0695cc]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Contact</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <BarChart2 size={20} className="text-[#ffbc38]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Poll</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <Calendar size={20} className="text-[#ff2e74]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">Event</span>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                        <StickyNote size={20} className="text-[#00a884]" />
+                                    </div>
+                                    <span className="text-[14.5px] font-normal">New sticker</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
 
                         {/* Emoji */}
                         <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
@@ -698,10 +868,140 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             </span>
                         </button>
                     </footer>
+
+                    {/* Hidden Inputs */}
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        multiple
+                        onChange={handleFileSelect}
+                    />
+                    <input
+                        type="file"
+                        ref={mediaInputRef}
+                        className="hidden"
+                        accept="image/*,video/*"
+                        multiple
+                        onChange={handleFileSelect}
+                    />
+
+                    {/* File Upload Preview Overlay (covers messages + footer only) */}
+                    {isPreviewOpen && (
+                        <FileUploadPreview
+                            files={pendingFiles}
+                            onClose={() => {
+                                setIsPreviewOpen(false);
+                                setPendingFiles([]);
+                            }}
+                            onSend={handleSendFiles}
+                            onAddMore={() => {
+                                fileInputRef.current?.click();
+                            }}
+                            onRemoveFile={handleRemoveFile}
+                        />
+                    )}
+
+                    </div>{/* end relative wrapper */}
                 </div>
 
-                {/* ── Side Info Panel ───────────────────────────── */}
-                {isInfoOpen && (
+                {/* ── Side Info Panel (Contact/Message Info) ───────────────────────────── */}
+                {messageInfoMsg ? (
+                    <div className="w-[400px] lg:w-[450px] border-l border-[#d1d7db] bg-white flex flex-col h-full animate-in slide-in-from-right duration-300">
+                        {/* Header */}
+                        <div className="flex items-center gap-6 px-4 py-3 bg-white h-[60px] border-b border-[#f0f2f5]">
+                            <button onClick={() => setMessageInfoMsg(null)} className="text-[#54656f] hover:text-[#111b21] transition-colors">
+                                <X size={24} />
+                            </button>
+                            <h2 className="text-[17px] font-medium text-[#111b21]">Message info</h2>
+                        </div>
+
+                        {/* Content Area */}
+                        <div className="flex-1 overflow-y-auto bg-[#efeae2] info-sheet-scrollbar">
+                            {/* Bubble Preview Area with Doodle Background */}
+                            <div className="relative pt-6 pb-4 px-6 doodle-bg flex justify-center items-start chat-bg-doodle min-h-[140px]">
+                                {/* <div className="absolute inset-0 opacity-10 pointer-events-none" ></div> */}
+                                <div className={`relative max-w-[85%] ${((typeof messageInfoMsg.user === 'object' ? messageInfoMsg.user.id : messageInfoMsg.user) === currentUser?.id) ? 'bubble-sent' : 'bubble-received'} shadow-sm px-2.5 py-1 z-10`}>
+                                    <div className="flex flex-col min-w-[120px]">
+                                        <p className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap pr-1">{messageInfoMsg.content}</p>
+                                        <div className="flex items-center justify-end gap-1 h-4">
+                                            <span className="text-[11px] text-[#667781] leading-none">
+                                                {getDateTimeByTimezone(messageInfoMsg.timestamp, currentUser?.timezone || "utc").time}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Info Sections */}
+                            <div className="bg-white flex flex-col">
+                                <div className="px-6 py-4 flex items-center gap-2">
+                                    <CheckIcon2_ height={18} width={18} className="text-[#53bdeb]" />
+                                    <span className="text-[14px] text-[#008069] font-medium tracking-wide">Read by</span>
+                                </div>
+                                <div className="space-y-0.5 border-t border-[#f0f2f5]">
+                                    {messageReadRecipients && messageReadRecipients.length > 0 && (
+                                        messageReadRecipients.map((recipient) => (
+                                            <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                <Avatar className="h-10 w-10">
+                                                    <AvatarImage src={recipient.user.profile_pic} />
+                                                    <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                        {recipient.contact_name?.slice(0, 1).toUpperCase() || 'U'}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex-1 py-2">
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                            <span className="text-[12px] text-[#667781]">
+                                                                {recipient.read_date && formatDatetime(recipient.read_date, currentUser?.timezone || "utc")}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {
+                                    messageDeliveredRecipients && messageDeliveredRecipients.length > 0 && (
+                                        <>
+                                            <div className="px-6 py-4 flex items-center gap-4 mt-2 border-t border-[#f0f2f5]">
+                                                <CheckIcon2_ height={18} width={18} className="text-[#8696a0]" />
+                                                <span className="text-[14px] text-[#667781] font-medium tracking-wide">Delivered</span>
+                                            </div>
+                                            <div className="space-y-0.5 border-t">
+                                                {messageDeliveredRecipients.map((recipient) => (
+                                                    <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                        <Avatar className="h-10 w-10">
+                                                            <AvatarImage src={recipient.user.profile_pic} />
+                                                            <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                                {recipient.contact_name?.slice(0, 1).toUpperCase() || 'M'}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div className="flex-1 border-b border-[#f0f2f5] py-2">
+                                                            <div className="flex justify-between items-center">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                                    <span className="text-[12px] text-[#667781]">
+                                                                        {recipient.delivered_date && formatDatetime(recipient.delivered_date, currentUser?.timezone || "utc")}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                                }
+                                            </div>
+                                        </>
+                                    )
+                                }
+
+                            </div>
+                        </div>
+                    </div>
+                ) : isInfoOpen ? (
                     <ContactInfo
                         onClose={() => setIsInfoOpen(false)}
                         directMessageUserInfo={
@@ -725,8 +1025,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         }
                         groupMembers={groupMembers}
                     />
-                )}
+                ) : null}
             </div>
+
+
         </SidebarInset>
     );
 };

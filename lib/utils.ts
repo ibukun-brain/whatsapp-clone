@@ -132,12 +132,14 @@ export function getDateLabel(
     (nowDateOnly.getTime() - msgDateOnly.getTime()) / (1000 * 60 * 60 * 24)
   );
 
-  if (diffDays === 0) return "TODAY";
-  if (diffDays === 1) return "YESTERDAY";
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
   if (diffDays >= 2 && diffDays <= 6) {
-    return inputDate
-      .toLocaleDateString("en-US", { timeZone: userTimezone, weekday: "long" })
-      .toUpperCase();
+    const weekday = inputDate.toLocaleDateString("en-US", {
+      timeZone: userTimezone,
+      weekday: "long",
+    });
+    return weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
   }
 
   // Older than a week – show formatted date
@@ -157,7 +159,7 @@ export function getDateLabel(
  * - Within week: '"Tue" at 1:27pm'
  * - Older: "on 02/06/2026 at 1:27pm"
  */
-export function formatLastSeen(
+export function formatDatetime(
   datetime: Date | string,
   userTimezone: string = "UTC"
 ): string {
@@ -210,8 +212,8 @@ export function formatLastSeen(
     (nowDateOnly.getTime() - msgDateOnly.getTime()) / (1000 * 60 * 60 * 24)
   );
 
-  if (diffDays === 0) return `today at ${timeStr}`;
-  if (diffDays === 1) return `yesterday at ${timeStr}`;
+  if (diffDays === 0) return `Today at ${timeStr}`;
+  if (diffDays === 1) return `Yesterday at ${timeStr}`;
   if (diffDays >= 2 && diffDays <= 6) {
     const weekday = inputDate.toLocaleDateString("en-US", {
       timeZone: userTimezone,
