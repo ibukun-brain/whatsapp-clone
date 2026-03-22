@@ -26,7 +26,12 @@ import { useScrollManager } from "@/hooks/use-scroll-manager";
 import { CheckIcon2 as CheckIcon2_ } from "@/components/icons/chats-icon";
 import { useUnreadMessages } from "@/hooks/use-unread-messages";
 import FileUploadPreview from "./file-upload-preview";
+import PhotoVideoUploadPreview from "./photo-video-upload-preview";
 import { uploadAttachment } from "@/lib/attachment-upload";
+import { ContactSelectModal } from "./contact-select-modal";
+import { Contact } from "@/types";
+import { toast } from "sonner";
+import { useMediaUpload } from "@/hooks/use-media-upload";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -96,10 +101,17 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [dmGroupsInCommon, setDmGroupsInCommon] = React.useState<DMGroupsInCommon[]>([])
     const [hasText, setHasText] = React.useState(false);
     const [localOptimisticMessages, setLocalOptimisticMessages] = React.useState<(DirectMessageChats | GroupMessageChats)[]>([]);
-    
+    const { upload: uploadMediaFiles } = useMediaUpload(chatId);
+
     // ── Upload ────────────────────────────────────────────────────────
     const [pendingFiles, setPendingFiles] = React.useState<File[]>([]);
     const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+
+    // Media (Photos & Videos) state
+    const [pendingMedia, setPendingMedia] = React.useState<File[]>([]);
+    const [isMediaPreviewOpen, setIsMediaPreviewOpen] = React.useState(false);
+    const [isContactModalOpen, setIsContactModalOpen] = React.useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaInputRef = useRef<HTMLInputElement>(null);
 
@@ -180,6 +192,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const CHAT_WS_URL = `ws://localhost:8000/ws/chats/${chatId}/`;
     const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage } = useWebSocket(CHAT_WS_URL, {
         shouldReconnect: () => true,
+        share: true,
     });
 
     // ── Global WS send (typing indicators) ───────────────────────────
@@ -417,26 +430,32 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         e.target.value = "";
     };
 
+    const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length > 0) {
+            setPendingMedia(prev => [...prev, ...selectedFiles]);
+            setIsMediaPreviewOpen(true);
+        }
+        e.target.value = "";
+    };
+
     const handleSendFiles = async (files: File[], captions: Record<number, string>) => {
         if (!currentUser) return;
 
         try {
-            // Upload all files (PDF thumbnails generated automatically)
-            const uploadResults = await Promise.all(
-                files.map((file) => uploadAttachment(file))
-            );
-
-            console.log("Upload results:", uploadResults);
-            console.log("Captions:", captions);
-
-            // TODO: Send message with attachments via WS or HTTP
-            // The uploadResults array contains Attachment objects ready to attach to a message.
-            // Each caption is keyed by the file index: captions[0], captions[1], etc.
+            await uploadMediaFiles(files, {
+                is_dm: chatType === "directmessage",
+                context_id: chatId
+            });
+            scrollToBottom();
         } catch (error) {
             console.error("Failed to upload files:", error);
+            toast.error("Failed to upload some files.");
         } finally {
             setPendingFiles([]);
+            setPendingMedia([]);
             setIsPreviewOpen(false);
+            setIsMediaPreviewOpen(false);
         }
     };
 
@@ -448,6 +467,42 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             }
             return next;
         });
+    };
+
+    const handleRemoveMediaFile = (index: number) => {
+        setPendingMedia(prev => {
+            const next = prev.filter((_, i) => i !== index);
+            if (next.length === 0) {
+                setIsMediaPreviewOpen(false);
+            }
+            return next;
+        });
+    };
+
+    const handleSendContacts = async (selectedContacts: Contact[]) => {
+        if (!selectedContacts.length || !currentUser) return;
+
+        // Exclude current user from the shared contacts list
+        const filteredContacts = selectedContacts.filter(c => c.contact_user?.id !== currentUser.id);
+        if (filteredContacts.length === 0) return;
+
+        try {
+            // Construct a message showing the shared contacts
+            const contactNames = filteredContacts.map(c => c.contact_name).join(", ");
+            const text = `Shared ${filteredContacts.length > 1 ? "contacts" : "contact"}: ${contactNames}`;
+
+            sendChatMessage({
+                type: chatType,
+                data: {
+                    action: "send",
+                    message: { text },
+                },
+            });
+            
+            scrollToBottom();
+        } catch (error) {
+            console.error("Failed to send contacts:", error);
+        }
     };
 
     // ─── Draft: restore when entering a chat ─────────────────────────────────
@@ -583,7 +638,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         <SidebarInset>
             <div className="flex bg-[#efeae2] h-screen overflow-hidden">
                 {/* ── Main Chat Section ───────────────────────────── */}
-                <div className="flex flex-col flex-1 border-r border-[#d1d7db]">
+                <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
                     {/* ── Header ─────────────────────────────────────────── */}
                     <ChatHeader
                         onOpenInfo={() => setIsInfoOpen(true)}
@@ -612,295 +667,323 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     {/* ── Messages + Footer + Upload Preview wrapper ── */}
                     <div className="flex-1 flex flex-col relative overflow-hidden">
 
-                    {/* ── Messages Area ───────────────────────────────────── */}
-                    <div
-                        ref={scrollContainerRef}
-                        onScroll={handleScroll}
-                        className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
-                    >
-                        {/* direct message chats */}
-                        {currentUser && (() => {
-                            const dbMessages = directMessageChats || [];
-                            const combined = [...dbMessages];
-
-                            localOptimisticMessages.forEach(optMsg => {
-                                if ('direct_message_id' in optMsg && optMsg.direct_message_id === chatId) {
-                                    const exists = dbMessages.some(m => m.content === optMsg.content && m.user === optMsg.user);
-                                    if (!exists) combined.push(optMsg as DirectMessageChats);
-                                }
-                            });
-
-                            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-                            if (combined.length === 0) return null;
-
-                            const firstUnreadId = unreadState.firstUnreadId;
-                            const unreadCount = unreadState.unreadCount;
-
-                            let lastDateLabel = "";
-
-                            return combined.map((msg, index) => {
-                                const prevMsg = index > 0 ? combined[index - 1] : null;
-                                const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                const showSeparator = dateLabel !== lastDateLabel;
-                                if (showSeparator) lastDateLabel = dateLabel;
-                                const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
-                                return (
-                                    <React.Fragment key={msg.id}>
-                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                        {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble
-                                            msg={msg}
-                                            currentUser={currentUser}
-                                            isDM={true}
-                                            isConsecutive={isConsecutive}
-                                            onShowInfo={setMessageInfoMsg}
-                                        />
-                                    </React.Fragment>
-                                );
-                            });
-                        })()}
-
-                        {/* group message chats */}
-                        {currentUser && (() => {
-                            const dbMessages = groupMessageChats || [];
-                            const combined = [...dbMessages];
-
-                            localOptimisticMessages.forEach(optMsg => {
-                                if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
-                                    const exists = dbMessages.some(m => {
-                                        const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
-                                        const optUserId = typeof optMsg.user === 'object' && optMsg.user !== null ? (optMsg.user as User).id : (optMsg.user as unknown as string);
-                                        return m.content === optMsg.content && mUserId === optUserId;
-                                    });
-                                    if (!exists) combined.push(optMsg as GroupMessageChats);
-                                }
-                            });
-
-                            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-                            if (combined.length === 0) return null;
-
-                            const firstUnreadId = unreadState.firstUnreadId;
-                            const unreadCount = unreadState.unreadCount;
-
-                            let lastDateLabel = "";
-
-                            return combined.map((msg, index) => {
-                                const prevMsg = index > 0 ? combined[index - 1] : null;
-                                const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                const showSeparator = dateLabel !== lastDateLabel;
-                                if (showSeparator) lastDateLabel = dateLabel;
-                                const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
-                                const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
-                                const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
-                                return (
-                                    <React.Fragment key={msg.id}>
-                                        {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                        {showSeparator && <DateSeparator label={dateLabel} />}
-                                        <MessageBubble
-                                            msg={msg}
-                                            currentUser={currentUser}
-                                            isDM={false}
-                                            isConsecutive={isConsecutive}
-                                            onShowInfo={setMessageInfoMsg}
-                                        />
-                                    </React.Fragment>
-                                );
-                            });
-                        })()}
-                        {/* Bottom anchor — used for scroll-to-bottom */}
-                        <div ref={bottomAnchorRef} className="h-2" />
-                    </div>
-
-                    {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
-                    {groupMessage && typingUsers.length > 0 && (
-                        <div className="flex items-end gap-4 px-4 pb-3">
-                            {/* Stacked mini avatars — up to 3 shown */}
-                            <AvatarGroup>
-                                {typingUsers.slice(0, 3).map((u) => (
-                                    <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
-                                        <AvatarImage src={u.image || undefined} />
-                                        <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
-                                            {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                ))}
-                            </AvatarGroup>
-
-                            {/* Typing bubble with three-dot bounce */}
-                            <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
-                                <span className="typing-dot typing-dot-1" />
-                                <span className="typing-dot typing-dot-2" />
-                                <span className="typing-dot typing-dot-3" />
-                            </div>
-                        </div>
-                    )}
-
-
-
-                    {/* ── Input Bar ───────────────────────────────────────── */}
-                    <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
-                        {/* Plus (attach) */}
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer outline-none">
-                                    <AttachmentPlusIcon
-                                        style={{ width: "24px", height: "24px" }}
-                                        className="text-[#54656f]"
-                                    />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                                side="top"
-                                align="start"
-                                className="mb-4 48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
-                            >
-                                <DropdownMenuItem
-                                    className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                    onClick={() => fileInputRef.current?.click()}
-                                >
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <FileText size={20} className="text-[#7f66ff]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Document</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem 
-                                    className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                    onClick={() => mediaInputRef.current?.click()}
-                                >
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <ImageIcon size={20} className="text-[#007bfc]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Photos & videos</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <Camera size={20} className="text-[#ff2e74]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Camera</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <Headphones size={20} className="text-[#ff7f35]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Audio</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <UserIcon size={20} className="text-[#0695cc]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Contact</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <BarChart2 size={20} className="text-[#ffbc38]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Poll</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <Calendar size={20} className="text-[#ff2e74]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">Event</span>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                        <StickyNote size={20} className="text-[#00a884]" />
-                                    </div>
-                                    <span className="text-[14.5px] font-normal">New sticker</span>
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-
-                        {/* Emoji */}
-                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                            <EmojiIcon
-                                style={{ width: "24px", height: "24px" }}
-                                className="text-[#54656f]"
-                            />
-                        </button>
-
-                        {/* Text Input */}
-                        <div className="flex-1">
-                            <textarea
-                                ref={inputRef}
-                                rows={1}
-                                placeholder="Type a message"
-                                className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
-                                style={{ maxHeight: 120, overflow: "hidden" }}
-                                onChange={handleInputChange}
-                                onKeyDown={handleTyping}
-                            />
-                        </div>
-
-                        {/* Mic / Send */}
-                        <button
-                            onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
-                            onClick={hasText ? handleSendMessage : undefined}
-                            className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-all shrink-0 cursor-pointer"
+                        {/* ── Messages Area ───────────────────────────────────── */}
+                        <div
+                            ref={scrollContainerRef}
+                            onScroll={handleScroll}
+                            className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
                         >
-                            <span
-                                className="transition-all duration-150"
-                                style={{
-                                    display: "inline-flex",
-                                    transform: hasText ? "scale(1.1) rotate(0deg)" : "scale(1) rotate(0deg)",
-                                }}
+                            {/* direct message chats */}
+                            {currentUser && (() => {
+                                const dbMessages = directMessageChats || [];
+                                const combined = [...dbMessages];
+
+                                localOptimisticMessages.forEach(optMsg => {
+                                    if ('direct_message_id' in optMsg && optMsg.direct_message_id === chatId) {
+                                        const exists = dbMessages.some(m => m.content === optMsg.content && m.user === optMsg.user);
+                                        if (!exists) combined.push(optMsg as DirectMessageChats);
+                                    }
+                                });
+
+                                combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                                if (combined.length === 0) return null;
+
+                                const firstUnreadId = unreadState.firstUnreadId;
+                                const unreadCount = unreadState.unreadCount;
+
+                                let lastDateLabel = "";
+
+                                return combined.map((msg, index) => {
+                                    const prevMsg = index > 0 ? combined[index - 1] : null;
+                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                    const showSeparator = dateLabel !== lastDateLabel;
+                                    if (showSeparator) lastDateLabel = dateLabel;
+                                    const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
+                                    return (
+                                        <React.Fragment key={msg.id}>
+                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                            {showSeparator && <DateSeparator label={dateLabel} />}
+                                            <MessageBubble
+                                                msg={msg}
+                                                currentUser={currentUser}
+                                                isDM={true}
+                                                isConsecutive={isConsecutive}
+                                                onShowInfo={setMessageInfoMsg}
+                                            />
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()}
+
+                            {/* group message chats */}
+                            {currentUser && (() => {
+                                const dbMessages = groupMessageChats || [];
+                                const combined = [...dbMessages];
+
+                                localOptimisticMessages.forEach(optMsg => {
+                                    if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
+                                        const exists = dbMessages.some(m => {
+                                            const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
+                                            const optUserId = typeof optMsg.user === 'object' && optMsg.user !== null ? (optMsg.user as User).id : (optMsg.user as unknown as string);
+                                            return m.content === optMsg.content && mUserId === optUserId;
+                                        });
+                                        if (!exists) combined.push(optMsg as GroupMessageChats);
+                                    }
+                                });
+
+                                combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                                if (combined.length === 0) return null;
+
+                                const firstUnreadId = unreadState.firstUnreadId;
+                                const unreadCount = unreadState.unreadCount;
+
+                                let lastDateLabel = "";
+
+                                return combined.map((msg, index) => {
+                                    const prevMsg = index > 0 ? combined[index - 1] : null;
+                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                    const showSeparator = dateLabel !== lastDateLabel;
+                                    if (showSeparator) lastDateLabel = dateLabel;
+                                    const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
+                                    const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
+                                    const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
+                                    return (
+                                        <React.Fragment key={msg.id}>
+                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                            {showSeparator && <DateSeparator label={dateLabel} />}
+                                            <MessageBubble
+                                                msg={msg}
+                                                currentUser={currentUser}
+                                                isDM={false}
+                                                isConsecutive={isConsecutive}
+                                                onShowInfo={setMessageInfoMsg}
+                                            />
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()}
+                            {/* Bottom anchor — used for scroll-to-bottom */}
+                            <div ref={bottomAnchorRef} className="h-2" />
+                        </div>
+
+                        {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
+                        {groupMessage && typingUsers.length > 0 && (
+                            <div className="flex items-end gap-4 px-4 pb-3">
+                                {/* Stacked mini avatars — up to 3 shown */}
+                                <AvatarGroup>
+                                    {typingUsers.slice(0, 3).map((u) => (
+                                        <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
+                                            <AvatarImage src={u.image || undefined} />
+                                            <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
+                                                {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                    ))}
+                                </AvatarGroup>
+
+                                {/* Typing bubble with three-dot bounce */}
+                                <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
+                                    <span className="typing-dot typing-dot-1" />
+                                    <span className="typing-dot typing-dot-2" />
+                                    <span className="typing-dot typing-dot-3" />
+                                </div>
+                            </div>
+                        )}
+
+
+
+                        {/* ── Input Bar ───────────────────────────────────────── */}
+                        <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
+                            {/* Plus (attach) */}
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer outline-none">
+                                        <AttachmentPlusIcon
+                                            style={{ width: "24px", height: "24px" }}
+                                            className="text-[#54656f]"
+                                        />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                    side="top"
+                                    align="start"
+                                    className="mb-4 48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                                >
+                                    <DropdownMenuItem
+                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <FileText size={20} className="text-[#7f66ff]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Document</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem
+                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                        onClick={() => mediaInputRef.current?.click()}
+                                    >
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <ImageIcon size={20} className="text-[#007bfc]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Photos & videos</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <Camera size={20} className="text-[#ff2e74]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Camera</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <Headphones size={20} className="text-[#ff7f35]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Audio</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem 
+                                        onClick={() => setIsContactModalOpen(true)}
+                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                    >
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <UserIcon size={20} className="text-[#0695cc]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Contact</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <BarChart2 size={20} className="text-[#ffbc38]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Poll</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <Calendar size={20} className="text-[#ff2e74]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">Event</span>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                            <StickyNote size={20} className="text-[#00a884]" />
+                                        </div>
+                                        <span className="text-[14.5px] font-normal">New sticker</span>
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            {/* Emoji */}
+                            <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
+                                <EmojiIcon
+                                    style={{ width: "24px", height: "24px" }}
+                                    className="text-[#54656f]"
+                                />
+                            </button>
+
+                            {/* Text Input */}
+                            <div className="flex-1">
+                                <textarea
+                                    ref={inputRef}
+                                    rows={1}
+                                    placeholder="Type a message"
+                                    className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
+                                    style={{ maxHeight: 120, overflow: "hidden" }}
+                                    onChange={handleInputChange}
+                                    onKeyDown={handleTyping}
+                                />
+                            </div>
+
+                            {/* Mic / Send */}
+                            <button
+                                onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
+                                onClick={hasText ? handleSendMessage : undefined}
+                                className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-all shrink-0 cursor-pointer"
                             >
-                                {hasText ? (
-                                    <SendIcon
-                                        style={{ width: "24px", height: "24px" }}
-                                        className="text-[#54656f]"
-                                    />
-                                ) : (
-                                    <MicrophoneIcon
-                                        style={{ width: "24px", height: "24px" }}
-                                        className="text-[#54656f]"
-                                    />
-                                )}
-                            </span>
-                        </button>
-                    </footer>
+                                <span
+                                    className="transition-all duration-150"
+                                    style={{
+                                        display: "inline-flex",
+                                        transform: hasText ? "scale(1.1) rotate(0deg)" : "scale(1) rotate(0deg)",
+                                    }}
+                                >
+                                    {hasText ? (
+                                        <SendIcon
+                                            style={{ width: "24px", height: "24px" }}
+                                            className="text-[#54656f]"
+                                        />
+                                    ) : (
+                                        <MicrophoneIcon
+                                            style={{ width: "24px", height: "24px" }}
+                                            className="text-[#54656f]"
+                                        />
+                                    )}
+                                </span>
+                            </button>
+                        </footer>
 
-                    {/* Hidden Inputs */}
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        multiple
-                        onChange={handleFileSelect}
-                    />
-                    <input
-                        type="file"
-                        ref={mediaInputRef}
-                        className="hidden"
-                        accept="image/*,video/*"
-                        multiple
-                        onChange={handleFileSelect}
-                    />
-
-                    {/* File Upload Preview Overlay (covers messages + footer only) */}
-                    {isPreviewOpen && (
-                        <FileUploadPreview
-                            files={pendingFiles}
-                            onClose={() => {
-                                setIsPreviewOpen(false);
-                                setPendingFiles([]);
-                            }}
-                            onSend={handleSendFiles}
-                            onAddMore={() => {
-                                fileInputRef.current?.click();
-                            }}
-                            onRemoveFile={handleRemoveFile}
+                        {/* Hidden Inputs */}
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            multiple
+                            onChange={handleFileSelect}
                         />
-                    )}
+                        <input
+                            type="file"
+                            ref={mediaInputRef}
+                            className="hidden"
+                            accept="image/*,video/*"
+                            multiple
+                            onChange={handleMediaSelect}
+                        />
+
+                        {/* File Upload Preview Overlay (covers messages + footer only) */}
+                        {isPreviewOpen && (
+                            <FileUploadPreview
+                                files={pendingFiles}
+                                onClose={() => {
+                                    setIsPreviewOpen(false);
+                                    setPendingFiles([]);
+                                }}
+                                onSend={handleSendFiles}
+                                onAddMore={() => {
+                                    fileInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveFile}
+                            />
+                        )}
+
+                        {/* Photo/Video Editor Preview */}
+                        {isMediaPreviewOpen && (
+                            <PhotoVideoUploadPreview
+                                files={pendingMedia}
+                                onClose={() => {
+                                    setIsMediaPreviewOpen(false);
+                                    setPendingMedia([]);
+                                }}
+                                onSend={handleSendFiles} // Reuse same send logic
+                                onAddMore={() => {
+                                    mediaInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveMediaFile}
+                            />
+                        )}
+
+                        {/* Contact Select Modal */}
+                        {isContactModalOpen && (
+                            <ContactSelectModal
+                                isOpen={isContactModalOpen}
+                                onClose={() => setIsContactModalOpen(false)}
+                                onSend={handleSendContacts}
+                            />
+                        )}
 
                     </div>{/* end relative wrapper */}
                 </div>

@@ -1,3 +1,5 @@
+import { MediaFile, MediaStatus} from "./mediaTypes";
+
 export type User = {
   id: string;
   display_name: string;
@@ -96,7 +98,8 @@ type MessageType =
   | "voice"
   | "emoji"
   | "document"
-  | "status-reply";
+  | "status-reply"
+  | "media";
 
 export type Attachment = {
   id: string;
@@ -114,7 +117,6 @@ export type DirectMessageChats = {
   user: string;
   reply: null;
   content: string;
-  files: [];
   type: MessageType;
   depth: number | null;
   delivered_date?: Date;
@@ -124,6 +126,8 @@ export type DirectMessageChats = {
   deleted: boolean;
   timestamp: Date;
   isOptimistic?: boolean;
+  files?: MediaFile[];
+  uploadStatus?: MediaStatus;
   attachments?: Attachment[];
 }
 
@@ -147,24 +151,20 @@ export type WSData = {
 export type GroupMessageChats = {
   id: string;
   groupchat_id: string;
-  user: User,
+  user: User;
   type: MessageType;
-  contact_name: string,
-  reply: {} | null,
-  content: string,
-  files: [
-    {
-      caption: string,
-      file: string
-    }
-  ],
-  depth: number | null,
-  forwarded: boolean,
-  edited: boolean,
-  deleted: boolean,
+  contact_name: string;
+  reply: {} | null;
+  content: string;
+  depth: number | null;
+  forwarded: boolean;
+  edited: boolean;
+  deleted: boolean;
   timestamp: Date;
   receipt: "sent" | "delivered" | "read";
   isOptimistic?: boolean;
+  files?: import("./mediaTypes").MediaFile[];
+  uploadStatus?: import("./mediaTypes").MediaStatus;
   attachments?: Attachment[];
 }
 

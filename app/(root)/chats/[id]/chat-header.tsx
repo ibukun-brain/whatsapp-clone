@@ -56,7 +56,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
     return (
         <header
             onClick={onOpenInfo}
-            className="flex items-center justify-between px-4 py-[10px] bg-white border-l z-10 cursor-pointer"
+            className="flex items-center justify-between px-4 py-[10px] bg-white border-l border-b z-10 cursor-pointer"
         >
             <div className={cn("flex items-start gap-3", !showContactHint && !showGroupHint && "items-center")}>
                 {directMessageUserInfo && groupMessageInfo === null && (

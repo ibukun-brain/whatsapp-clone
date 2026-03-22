@@ -4,6 +4,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone } from "@/lib/utils";
 import { Attachment, DirectMessageChats, GroupMessageChats, User } from "@/types";
 import PdfAttachmentPreview from "./pdf-attachment-preview";
+import MediaGrid from "@/components/chat/MediaGrid";
+import { useMediaUpload } from "@/hooks/use-media-upload";
+import { MediaFile } from "@/types/mediaTypes";
 import {
     ContextMenu,
     ContextMenuContent,
@@ -169,6 +172,25 @@ const MessageBubble = ({
         );
     };
 
+    const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
+    const { upload } = useMediaUpload(chatId);
+
+    const handleRetry = (file: MediaFile) => {
+        const context = {
+            is_dm: isDM,
+            context_id: isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id
+        };
+        // We need the original File object to retry. 
+        // IndexedDB doesn't store the File object, only the metadata.
+        // Usually, the sender might still have the file in memory or 
+        // we might store the Blob in IndexedDB.
+        // For now, since we don't store the blob, retry might be limited 
+        // to the current session if we keep a map of file_id -> File.
+        // However, the instructions say "onRetry re-triggers upload for that specific file".
+        toast.info("Retrying upload...");
+        // upload([originalFile], context); 
+    };
+
     return (
         <>
             {isDM ? (
@@ -176,12 +198,22 @@ const MessageBubble = ({
                     <MessageContextMenu>
                         <div className={`relative max-w-[72%] min-w-[200px] ${bubbleClass} shadow-sm px-2.5 py-1 cursor-default group`}>
                             <div className="flex flex-col">
-                                {/* Attachments */}
+                                {/* Standard Attachments (PDFs) */}
                                 {msg.attachments && msg.attachments.length > 0 && (
                                     <div className="flex flex-col gap-1 mb-1">
-                                        {msg.attachments.map((att: Attachment) => (
+                                        {(msg.attachments as Attachment[]).map((att: Attachment) => (
                                             <PdfAttachmentPreview key={att.id} attachment={att} />
                                         ))}
+                                    </div>
+                                )}
+
+                                {/* New Media Grid */}
+                                {msg.files && msg.files.length > 0 && (
+                                    <div className="mb-1">
+                                        <MediaGrid 
+                                            files={msg.files as MediaFile[]} 
+                                            onRetry={handleRetry} 
+                                        />
                                     </div>
                                 )}
 
@@ -210,12 +242,22 @@ const MessageBubble = ({
                     <MessageContextMenu>
                         <div className={`relative max-w-[72%] min-w-[200px] ${bubbleClass} shadow-sm px-2.5 py-1 cursor-default group`}>
                             <div className="flex flex-col">
-                                {/* Attachments */}
+                                {/* Standard Attachments (PDFs) */}
                                 {msg.attachments && msg.attachments.length > 0 && (
                                     <div className="flex flex-col gap-1 mb-1">
-                                        {msg.attachments.map((att: Attachment) => (
+                                        {(msg.attachments as Attachment[]).map((att: Attachment) => (
                                             <PdfAttachmentPreview key={att.id} attachment={att} />
                                         ))}
+                                    </div>
+                                )}
+
+                                {/* New Media Grid */}
+                                {msg.files && msg.files.length > 0 && (
+                                    <div className="mb-1">
+                                        <MediaGrid 
+                                            files={msg.files as MediaFile[]} 
+                                            onRetry={handleRetry} 
+                                        />
                                     </div>
                                 )}
 

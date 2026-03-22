@@ -174,7 +174,7 @@ const FileUploadPreview = ({
     return (
         <div className="absolute inset-0 z-40 bg-white flex flex-col animate-in fade-in duration-200">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-3 bg-[#f0f2f5] border-b border-[#e9edef]">
+            <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-[#e9edef]">
                 <button
                     onClick={onClose}
                     className="text-[#54656f] hover:text-[#111b21] transition-colors cursor-pointer"
@@ -234,13 +234,13 @@ const FileUploadPreview = ({
             </div>
 
             {/* Footer */}
-            <div className="bg-[#f0f2f5] px-6 py-3 flex flex-col gap-3 border-t border-[#e9edef]">
+            <div className="bg-white px-6 py-3 flex flex-col gap-3">
                 {/* Caption Input + Send */}
                 <div className="max-w-3xl mx-auto w-full flex items-center gap-3">
                     <div className="bg-white rounded-lg px-3 py-2 flex-1 flex items-center gap-2 shadow-sm">
                         <input
                             type="text"
-                            placeholder="Add a caption"
+                            placeholder="Type a message"
                             className="flex-1 bg-transparent border-none outline-none text-[15px] text-[#111b21] placeholder-[#8696a0]"
                             value={captions[currentIndex] || ""}
                             onChange={(e) => handleCaptionChange(e.target.value)}
