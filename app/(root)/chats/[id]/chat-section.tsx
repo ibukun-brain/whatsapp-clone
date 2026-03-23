@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef } from "react";
-import useWebSocket from "react-use-websocket";
+import useWebSocket, { ReadyState } from "react-use-websocket";
 import {
     MicrophoneIcon,
     EmojiIcon,
@@ -190,7 +190,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Handles send / edit / delete / reply for THIS chat only.
     // Reconnects automatically when chatId changes.
     const CHAT_WS_URL = `ws://localhost:8000/ws/chats/${chatId}/`;
-    const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage } = useWebSocket(CHAT_WS_URL, {
+    const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage, readyState } = useWebSocket(CHAT_WS_URL, {
         shouldReconnect: () => true,
         share: true,
     });
@@ -236,11 +236,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
             const incomingMsg = msg.data as DirectMessageChats;
             // Clear local optimistic state if matches
-            setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
-            // Clean up any optimistic messages in DB that match the content and user
+            setLocalOptimisticMessages(prev => prev.filter(m =>
+                m.client_msg_id ? m.client_msg_id !== incomingMsg.client_msg_id : m.content !== incomingMsg.content
+            ));
+            // Clean up any optimistic messages in DB that match the client_msg_id or content
             db.directmessagechats
                 .where('direct_message_id').equals(chatId)
-                .and(m => m.user === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content)
+                .and(m => (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || (m.user === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content))
                 .delete()
                 .then(() => {
                     db.directmessagechats.put(incomingMsg);
@@ -308,10 +310,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const text = inputRef.current?.value.trim();
         if (!text || !currentUser) return;
 
-        // Create optimistic message
+        // Create optimi message
         const timestamp = new Date();
         const tempId = `temp-${Date.now()}`;
-
+        const clientMsgId = `cmsg-${Date.now()}`;
         let optimisticMsg: DirectMessageChats | GroupMessageChats;
 
         if (chatType === "directmessage") {
@@ -329,7 +331,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 forwarded: false,
                 edited: false,
                 deleted: false,
-            };
+                client_msg_id: clientMsgId
+            } as DirectMessageChats;
             // Add to local state IMMEDIATELY for zero latency
             setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
             // Still save to DB for background persistence
@@ -343,7 +346,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 contact_name: currentUser.display_name,
                 reply: null,
                 content: text,
-                files: [] as any,
                 depth: null,
                 forwarded: false,
                 edited: false,
@@ -351,20 +353,33 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 timestamp: timestamp,
                 receipt: "sent",
                 isOptimistic: true,
-            };
+                client_msg_id: clientMsgId
+            } as GroupMessageChats;
             // Add to local state IMMEDIATELY for zero latency
             setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
             // Still save to DB for background persistence
             db.groupmessagechats.put(optimisticMsg as GroupMessageChats);
         }
 
-        sendChatMessage({
-            type: chatType,
-            data: {
-                action: "send",
-                message: { text },
-            },
-        });
+        const isConnected = readyState === ReadyState.OPEN;
+
+        if (isConnected) {
+            sendChatMessage({
+                type: chatType,
+                data: {
+                    action: "send",
+                    message: { text, client_msg_id: (optimisticMsg as any)?.client_msg_id },
+                },
+            });
+        } else {
+            console.log('Chat WebSocket not open, marking message as failed');
+            if (chatType === "directmessage") {
+                await db.directmessagechats.update(tempId, { status: "failed" });
+            } else {
+                await db.groupmessagechats.update(tempId, { receipt: "failed" });
+            }
+            toast.error("Message not sent. Check your connection.");
+        }
 
         // Clear input, draft, and stop typing indicator
         if (inputRef.current) {
@@ -375,15 +390,50 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         stopTyping();
 
         // Clear draft memory so it doesn't get saved back on unmount
-        currentInputValueRef.current = "";
+        if (chatItemIdRef.current) {
+            db.chatlist.update(chatItemIdRef.current, { draft: null });
+        }
+    }, [currentUser, chatType, chatId, sendChatMessage, stopTyping]);
 
-        // Clear draft from IndexedDB immediately on send
-        const activeChatItem = directMessage ?? groupMessage;
-        if (activeChatItem) await db.chatlist.update(activeChatItem.id, { draft: null });
+    const handleRetryMessage = useCallback(async (msg: DirectMessageChats | GroupMessageChats) => {
+        // 1. Ensure client_msg_id exists
+        let clientMsgId = msg.client_msg_id;
+        if (!clientMsgId) {
+            clientMsgId = `cmsg-${Date.now()}`;
+            const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats;
+            await table.update(msg.id, { client_msg_id: clientMsgId });
+        }
 
-        // Scroll to bottom after sending
-        scrollToBottom();
-    }, [sendChatMessage, stopTyping, directMessage, groupMessage, chatType, chatId, currentUser, scrollToBottom]);
+        const isConnected = readyState === ReadyState.OPEN;
+
+        if (msg.type === 'text') {
+            if (isConnected) {
+                // Reset status locally
+                if (chatType === 'directmessage') {
+                    await db.directmessagechats.update(msg.id, { isOptimistic: true, status: undefined });
+                } else {
+                    await db.groupmessagechats.update(msg.id, { receipt: 'sent' });
+                }
+
+                sendChatMessage({
+                    type: chatType,
+                    data: {
+                        action: "send",
+                        message: { text: msg.content, client_msg_id: clientMsgId },
+                    },
+                });
+            } else {
+                toast.error("Still offline. Message not sent.");
+                // Ensure it stays/is 'failed'
+                if (chatType === 'directmessage') {
+                    await db.directmessagechats.update(msg.id, { status: "failed" });
+                } else {
+                    await db.groupmessagechats.update(msg.id, { receipt: "failed" });
+                }
+            }
+        }
+        // Media retry is handled by its own component but we could also add a general case here
+    }, [chatType, sendChatMessage, readyState]);
 
     const handleTyping = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Enter sends, Shift+Enter inserts a new line
@@ -444,9 +494,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
         try {
             await uploadMediaFiles(files, {
-                is_dm: chatType === "directmessage",
+                chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
                 context_id: chatId
-            });
+            }, captions);
             scrollToBottom();
         } catch (error) {
             console.error("Failed to upload files:", error);
@@ -498,7 +548,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     message: { text },
                 },
             });
-            
+
             scrollToBottom();
         } catch (error) {
             console.error("Failed to send contacts:", error);
@@ -845,7 +895,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                         <span className="text-[14.5px] font-normal">Audio</span>
                                     </DropdownMenuItem>
 
-                                    <DropdownMenuItem 
+                                    <DropdownMenuItem
                                         onClick={() => setIsContactModalOpen(true)}
                                         className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
                                     >

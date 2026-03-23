@@ -96,14 +96,12 @@ const PhotoVideoUploadPreview = ({
 
     return (
         <div className={cn(
-            "absolute inset-0 z-40 flex flex-col animate-in fade-in duration-200",
-            isVideo ? "bg-black" : "bg-white"
+            "absolute inset-0 z-40 flex flex-col animate-in fade-in duration-200 bg-white",
         )}>
             {/* Header / Global Navigation */}
             <div className="flex items-center justify-between px-5 py-3 h-[60px] z-50">
                 <button onClick={onClose} className={cn(
-                    "p-2 rounded-full transition-all",
-                    isVideo ? "text-white hover:bg-white/10" : "text-[#54656f] hover:bg-gray-100"
+                    "p-2 rounded-full transition-all text-[#54656f] hover:bg-gray-100"
                 )}>
                     <X size={24} />
                 </button>
@@ -138,10 +136,7 @@ const PhotoVideoUploadPreview = ({
                     </div>
                 )}
 
-                <button onClick={handleDownload} className={cn(
-                    "p-2 rounded-full transition-all",
-                    isVideo ? "text-white hover:bg-white/10" : "text-[#54656f] hover:bg-gray-100"
-                )}>
+                <button onClick={handleDownload} className={cn("text-[#54656f] hover:bg-gray-100")}>
                     <Download size={24} />
                 </button>
             </div>
@@ -170,8 +165,7 @@ const PhotoVideoUploadPreview = ({
 
             {/* Bottom Section */}
             <div className={cn(
-                "w-full flex flex-col gap-3 p-4 pb-8 z-50",
-                isVideo ? "bg-black" : "bg-white"
+                "w-full flex flex-col gap-3 p-4 pb-8 z-50 bg-white"
             )}>
                 {/* Caption Input + Send (Unified with FileUploadPreview) */}
                 <div className="max-w-3xl mx-auto w-full flex items-center gap-3">
@@ -232,8 +226,7 @@ const PhotoVideoUploadPreview = ({
                     <button
                         onClick={onAddMore}
                         className={cn(
-                            "w-[52px] h-[52px] rounded-lg border-2 border-dashed flex items-center justify-center transition-all shrink-0",
-                            isVideo ? "border-white/30 text-white/50 hover:bg-white/10" : "border-gray-300 text-gray-400 hover:bg-gray-50"
+                            "w-[52px] h-[52px] rounded-lg border-2 border-dashed flex items-center justify-center transition-all shrink-0 border-gray-300 text-gray-400 hover:bg-gray-50"
                         )}
                     >
                         <Plus size={24} />

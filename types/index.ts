@@ -126,6 +126,8 @@ export type DirectMessageChats = {
   deleted: boolean;
   timestamp: Date;
   isOptimistic?: boolean;
+  client_msg_id?: string;
+  status?: 'pending' | 'sent' | 'failed' | 'processing'; // Added top-level status
   files?: MediaFile[];
   uploadStatus?: MediaStatus;
   attachments?: Attachment[];
@@ -161,8 +163,9 @@ export type GroupMessageChats = {
   edited: boolean;
   deleted: boolean;
   timestamp: Date;
-  receipt: "sent" | "delivered" | "read";
+  receipt: "sent" | "delivered" | "read" | "failed";
   isOptimistic?: boolean;
+  client_msg_id?: string;
   files?: import("./mediaTypes").MediaFile[];
   uploadStatus?: import("./mediaTypes").MediaStatus;
   attachments?: Attachment[];
