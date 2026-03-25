@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 
 interface MediaGridProps {
   files: MediaFile[]
+  isMine?: boolean
   onRetry?: (file: MediaFile) => void
   onCancel?: (file: MediaFile) => void
   timestamp?: string
@@ -15,7 +16,7 @@ interface MediaGridProps {
   messageStatus?: string
 }
 
-function MediaGridComponent({ files, onRetry, onCancel, timestamp: msgTimestamp, receipt }: MediaGridProps) {
+function MediaGridComponent({ files, isMine, onRetry, onCancel, timestamp: msgTimestamp, receipt }: MediaGridProps) {
   if (!files || files.length === 0) return null
 
   const visuals = files.filter(f => f.type === 'image' || f.type === 'video')
@@ -42,6 +43,7 @@ function MediaGridComponent({ files, onRetry, onCancel, timestamp: msgTimestamp,
       <div key={file.file_id} className={cn("relative overflow-hidden rounded", className)}>
         <Component
           file={file}
+          isMine={isMine}
           onRetry={() => onRetry?.(file)}
           onCancel={() => onCancel?.(file)}
           timestamp={showMetadata ? msgTimestamp : undefined}

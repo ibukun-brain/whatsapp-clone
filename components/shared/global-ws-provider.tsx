@@ -450,10 +450,16 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             return;
                         }
 
-                        // Clean up any optimistic messages that match the content and user
+                        // Clean up any optimistic messages that match the content and user, or client_msg_id
                         await db.directmessagechats
                             .where('direct_message_id').equals(directMessageId)
-                            .and(m => m.user === currentUser?.id && m.isOptimistic === true && m.content === directChatMessage.content)
+                            .and(m => {
+                                const isOptimistic = m.isOptimistic === true;
+                                const isSameUser = m.user === currentUser?.id;
+                                const isSameClientMsgId = directChatMessage.client_msg_id && m.client_msg_id === directChatMessage.client_msg_id;
+                                const isSameContent = m.content === directChatMessage.content;
+                                return isOptimistic && isSameUser && (isSameClientMsgId || isSameContent);
+                            })
                             .delete();
 
                         const existing = await db.directmessagechats.get(directChatMessage.id);
@@ -483,12 +489,16 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             return;
                         }
 
-                        // Clean up any optimistic messages that match the content and user
+                        // Clean up any optimistic messages that match the content and user, or client_msg_id
                         await db.groupmessagechats
                             .where('groupchat_id').equals(groupChatId)
                             .and(m => {
                                 const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
-                                return mUserId === currentUser?.id && m.isOptimistic === true && m.content === groupChatMessage.content;
+                                const isOptimistic = m.isOptimistic === true;
+                                const isSameUser = mUserId === currentUser?.id;
+                                const isSameClientMsgId = groupChatMessage.client_msg_id && m.client_msg_id === groupChatMessage.client_msg_id;
+                                const isSameContent = m.content === groupChatMessage.content;
+                                return isOptimistic && isSameUser && (isSameClientMsgId || isSameContent);
                             })
                             .delete();
 

@@ -6,13 +6,14 @@ import { cn } from '@/lib/utils'
 
 interface VideoMessageProps {
   file: MediaFile
+  isMine?: boolean
   onRetry?: () => void
   onCancel?: () => void
   timestamp?: string
   receipt?: React.ReactNode
 }
 
-function VideoMessageComp({ file, onRetry, onCancel, timestamp, receipt }: VideoMessageProps) {
+function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt }: VideoMessageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const isReady = file.status === 'ready'
 
@@ -123,8 +124,17 @@ function VideoMessageComp({ file, onRetry, onCancel, timestamp, receipt }: Video
             }}
             className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2.5 text-[13px] font-medium text-white hover:bg-black/70 transition-all active:scale-95 shadow-lg border border-white/10 z-30"
           >
-            <Download className="h-5 w-5" strokeWidth={2.5} />
-            <span>{formatFileSize(file.file_size)}</span>
+            {isMine ? (
+              <>
+                <RefreshCw className="h-5 w-5" strokeWidth={2.5} />
+                <span>Retry</span>
+              </>
+            ) : (
+              <>
+                <Download className="h-5 w-5" strokeWidth={2.5} />
+                <span>{formatFileSize(file.file_size)}</span>
+              </>
+            )}
           </button>
         </div>
       )}

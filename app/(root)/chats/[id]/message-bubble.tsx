@@ -231,6 +231,7 @@ const MessageBubble = ({
                                     <div className="mb-1">
                                         <MediaGrid
                                             files={msg.files as MediaFile[]}
+                                            isMine={isMine}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             timestamp={time}
@@ -295,6 +296,7 @@ const MessageBubble = ({
                                     <div className="mb-1">
                                         <MediaGrid
                                             files={msg.files as MediaFile[]}
+                                            isMine={isMine}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             timestamp={time}

@@ -489,24 +489,25 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         e.target.value = "";
     };
 
-    const handleSendFiles = async (files: File[], captions: Record<number, string>) => {
+    const handleSendFiles = (files: File[], captions: Record<number, string>) => {
         if (!currentUser) return;
 
-        try {
-            await uploadMediaFiles(files, {
-                chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
-                context_id: chatId
-            }, captions);
+        // Clear UI immediately for instant feedback
+        setPendingFiles([]);
+        setPendingMedia([]);
+        setIsPreviewOpen(false);
+        setIsMediaPreviewOpen(false);
+
+        // Run upload in background
+        uploadMediaFiles(files, {
+            chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
+            context_id: chatId
+        }, captions).then(() => {
             scrollToBottom();
-        } catch (error) {
+        }).catch((error) => {
             console.error("Failed to upload files:", error);
             toast.error("Failed to upload some files.");
-        } finally {
-            setPendingFiles([]);
-            setPendingMedia([]);
-            setIsPreviewOpen(false);
-            setIsMediaPreviewOpen(false);
-        }
+        });
     };
 
     const handleRemoveFile = (index: number) => {

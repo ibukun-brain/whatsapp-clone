@@ -254,8 +254,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       })
     }
 
-    // 3. Start all uploads concurrently
-    await Promise.all(mediaFilesWithOriginals.map(async ({ originalFile, mediaFile }) => {
+    // 3. Start all uploads concurrently (don't await so UI is responsive)
+    Promise.all(mediaFilesWithOriginals.map(async ({ originalFile, mediaFile }) => {
       const tempFileId = mediaFile.file_id
       const controller = new AbortController()
       activeUploads.current.set(tempFileId, controller)
@@ -268,21 +268,21 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           aspect_ratio: mediaFile.aspect_ratio,
           signal: controller.signal,
           onProgress: async (progress) => {
-            const msg = await table.get(dbId)
+            const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, progress } : f
               )
-              await table.update(dbId, { files: updatedFiles })
+              await table.update(msg.id, { files: updatedFiles })
             }
           },
           onComplete: async (uploadId) => {
-            const msg = await table.get(dbId)
+            const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, status: 'processing' as const, file_id: uploadId } : f
               )
-              await table.update(dbId, {
+              await table.update(msg.id, {
                 files: updatedFiles,
               })
               activeUploads.current.delete(tempFileId)
@@ -290,13 +290,13 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           },
           onError: async (error) => {
             if (error === 'Canceled' || controller.signal.aborted) return
-            const msg = await table.get(dbId)
+            const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, status: 'failed' as const } : f
               )
 
-              await table.update(dbId, {
+              await table.update(msg.id, {
                 files: updatedFiles,
               })
             }
