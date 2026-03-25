@@ -751,7 +751,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     if (showSeparator) lastDateLabel = dateLabel;
                                     const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                     return (
-                                        <React.Fragment key={msg.id}>
+                                        <React.Fragment key={msg.client_msg_id || msg.id}>
                                             {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                             {showSeparator && <DateSeparator label={dateLabel} />}
                                             <MessageBubble
@@ -800,7 +800,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
                                     const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
                                     return (
-                                        <React.Fragment key={msg.id}>
+                                        <React.Fragment key={msg.client_msg_id || msg.id}>
                                             {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                             {showSeparator && <DateSeparator label={dateLabel} />}
                                             <MessageBubble
@@ -841,8 +841,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 </div>
                             </div>
                         )}
-
-
 
                         {/* ── Input Bar ───────────────────────────────────────── */}
                         <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">

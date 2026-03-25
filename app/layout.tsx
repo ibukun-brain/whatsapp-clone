@@ -4,6 +4,7 @@ import "./globals.css";
 import { APP_DESCRIPTION, APP_NAME, SERVER_URL } from "@/lib/constants";
 import Providers from "./providers";
 import { Toaster } from "@/components/ui/sonner";
+import { SerwistProvider } from "./serwist";
 
 const notoSans = Noto_Sans({
   variable: "--font-noto-sans",
@@ -29,7 +30,9 @@ export default function RootLayout({
       <body
         className={`${notoSans.variable} antialiased bg-[#fcf5eb] text-[#111b21]`}
       >
+        {/* <SerwistProvider swUrl="/sw.js"> */}
         <Providers>{children}</Providers>
+        {/* </SerwistProvider> */}
         <Toaster position="top-right" />
       </body>
     </html>

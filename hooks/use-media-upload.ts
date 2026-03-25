@@ -2,10 +2,72 @@ import { useCallback, useRef, useEffect } from 'react'
 import useWebSocket from 'react-use-websocket'
 import { db } from '@/lib/indexdb'
 import { computeBlurhash } from '@/lib/utils/computeBlurhash'
+import { axiosInstance } from '@/lib/axios'
 import { uploadMedia } from '@/lib/utils/mediaUploader'
+import { getValidFilename } from '@/lib/utils'
 import { UploadContext, MediaFile, MediaReadyEvent } from '@/types/mediaTypes'
-import { User, DirectMessageChats, GroupMessageChats } from '@/types'
-import { Files } from 'lucide-react'
+
+import { DirectMessageChats, GroupMessageChats } from '@/types'
+
+const WORD_MIMES = new Set([
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.oasis.opendocument.text',
+])
+const EXCEL_MIMES = new Set([
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.oasis.opendocument.spreadsheet',
+])
+const POWERPOINT_MIMES = new Set([
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.oasis.opendocument.presentation',
+])
+const ACCESS_MIMES = new Set([
+  'application/msaccess',
+  'application/x-msaccess',
+  'application/vnd.ms-access',
+])
+const ARCHIVE_MIMES = new Set([
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+  'application/x-7z-compressed',
+  'application/x-tar',
+  'application/gzip',
+  'application/x-bzip2',
+  'application/x-xz',
+])
+
+export function getMediaType(mimeType: string): MediaFile['type'] {
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.startsWith('video/')) return 'video'
+  if (mimeType.startsWith('audio/')) return 'audio'
+  if (mimeType === 'application/pdf') return 'pdf'
+  if (WORD_MIMES.has(mimeType)) return 'word'
+  if (EXCEL_MIMES.has(mimeType)) return 'excel'
+  if (POWERPOINT_MIMES.has(mimeType)) return 'powerpoint'
+  if (ACCESS_MIMES.has(mimeType)) return 'access'
+  if (ARCHIVE_MIMES.has(mimeType)) return 'archive'
+  return 'file'
+}
+
+function getAudioDuration(file: File): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const audio = new Audio(url)
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(url)
+      resolve(audio.duration)
+    }
+    audio.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(undefined)
+    }
+  })
+}
 
 export function useMediaUpload(chatId?: string, options: { listen?: boolean } = { listen: true }) {
   const activeUploads = useRef<Map<string, AbortController>>(new Map())
@@ -28,7 +90,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
   const handleMediaReady = useCallback(async ({ data }: MediaReadyEvent) => {
     console.log('Media Ready Event Received:', data)
     const table = data.chat_type === 'directmessage' ? db.directmessagechats : db.groupmessagechats
-
+    const files = data.files
     // Search both ID (temp or real)
     let message = await table.get(data.message_id)
     let currentId = data.message_id
@@ -36,10 +98,10 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     if (!message) {
       console.log('Message not found by message_id, searching by flags...')
       const allMessages = await table.toArray()
-      message = (allMessages as any[]).find(m => 
+      message = (allMessages as any[]).find(m =>
         (data.client_msg_id && m.client_msg_id === data.client_msg_id) ||
-        m.files?.some((f: MediaFile) => 
-          f.filename === data.filename && f.file_size === data.file_size
+        m.files?.some((f: MediaFile) =>
+          f.filename === data.files.filename && f.file_size === data.files.file_size
         )
       )
       if (message) {
@@ -50,33 +112,35 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       }
     }
 
-    if (!message || !message.files) return
+    const fileData = data.files
+    if (!message || !message.files) {
+      console.warn('CRITICAL: Message NOT FOUND even by fallback or missing files array. Skipping update.')
+      return
+    }
 
     const updatedFiles = message.files.map((f: MediaFile) => {
       // Find specific file by filename and size
-      const isMatch = f.filename === data.filename && f.file_size === data.file_size;
-
+      const isMatch = f.filename === fileData.filename && f.file_size === fileData.file_size;
+      console.log('isMatch', isMatch, f.filename, fileData.filename, f.file_size, fileData.file_size)
       if (isMatch) {
         return {
           ...f,
-          file_id: data.file_id,
+          file_id: fileData.file_id || f.file_id,
           status: 'ready' as const,
-          media_url: data.media_url,
-          thumbnail_url: data.thumbnail_url,
-          blurhash: data.blurhash || f.blurhash,
-          aspect_ratio: data.aspect_ratio || f.aspect_ratio,
+          media_url: fileData.media_url,
+          thumbnail_url: fileData.thumbnail_url,
+          blurhash: fileData.blurhash || f.blurhash,
+          aspect_ratio: fileData.aspect_ratio || f.aspect_ratio,
           preview_url: null,   // clear local blob URL
           progress: 100,
-          caption: data.caption || f.caption,
+          caption: fileData.caption || f.caption,
           file_blob: undefined, // Clear blob on success
         }
       }
       return f
     })
 
-
-    const allReady = updatedFiles.every((f: MediaFile) => f.status === 'ready')
-    console.log(`Updated files. All ready: ${allReady}. Files:`, updatedFiles)
+    console.log('Updated files:', updatedFiles)
 
     // Re-save with real message_id if it was temp
     if (currentId !== data.message_id) {
@@ -94,7 +158,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     console.log('Database record updated to READY.')
 
     // Remove from active uploads tracking
-    activeUploads.current.delete(data.file_id)
+    const fileId = data.files.file_id
+    activeUploads.current.delete(fileId)
   }, [])
 
   // Process lastJsonMessage
@@ -117,9 +182,12 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     const mediaFilesWithOriginals = await Promise.all(files.map(async (file, index) => {
       const { blurhash, aspect_ratio, preview_url } = await computeBlurhash(file)
       const tempFileId = `${Date.now()}-${index}`
-      const mediaType: MediaFile['type'] = file.type.startsWith('image/')
-        ? 'image'
-        : file.type.startsWith('video/') ? 'video' : 'file'
+      const mediaType: MediaFile['type'] = getMediaType(file.type)
+
+      let duration: number | undefined
+      if (mediaType === 'audio' || mediaType === 'video') {
+        duration = await getAudioDuration(file)
+      }
 
       return {
         originalFile: file,
@@ -133,12 +201,15 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           thumbnail_url: null,
           blurhash,
           aspect_ratio,
-          filename: file.name,
+          filename: getValidFilename(file.name),
           mime_type: file.type,
           file_size: file.size,
+          duration,
           caption: captions?.[index] || context.caption,
           file_blob: file, // Store for retry
+          timestamp,
         } as MediaFile
+
       }
     }))
 
@@ -224,7 +295,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, status: 'failed' as const } : f
               )
-              const allAttempted = updatedFiles.every(f => f.status !== 'uploading' && f.status !== 'processing')
+
               await table.update(dbId, {
                 files: updatedFiles,
               })
@@ -256,8 +327,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       const updatedFiles = msg.files.map((f: MediaFile) =>
         f.file_id === fileId ? { ...f, status: 'failed' as const } : f
       )
-      // Check if all files failed/ready to update overall status
-      const allDone = updatedFiles.every(f => f.status !== 'uploading' && f.status !== 'processing')
+
       await table.update(messageId, {
         files: updatedFiles,
       })
@@ -270,15 +340,36 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
   }, [])
 
   const retryUpload = useCallback(async (file: MediaFile, messageId: string, chatType: 'directmessage' | 'group_chat') => {
-    if (!file.file_blob) {
-      console.error('No blob found for retry')
-      return
-    }
-
     const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats
     const msg = await table.get(messageId)
     if (!msg) return
 
+    // Receiver-only path: If no blob exists, but we have URLs, just restore visibility
+    if (!file.file_blob) {
+      if (file.media_url) {
+        console.log('Restoring receiver visibility for ready media')
+        const up = (msg.files || []).map((f: MediaFile) =>
+          f.file_id === file.file_id ? { ...f, status: 'ready' as const } : f
+        )
+        await table.update(messageId, { files: up })
+        return
+      }
+
+      // If no URLs, try to fetch the latest message details from the API
+      try {
+        console.log('Fetching latest message data for:', messageId)
+        const endpoint = chatType === 'directmessage' ? `/directmessages/messages/${messageId}/` : `/groups/messages/${messageId}/`
+        const response = await axiosInstance.get(endpoint)
+        if (response.data) {
+          await table.put(response.data)
+        }
+      } catch (err) {
+        console.error('Failed to fetch message details for receiver:', err)
+      }
+      return
+    }
+
+    // Sender path: Standard re-upload logic (must have blob)
     // Safeguard: Ensure client_msg_id exists
     let clientMsgId = msg.client_msg_id
     if (!clientMsgId) {
@@ -305,21 +396,21 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     }
 
     console.log('Retrying upload with blob:', file.file_blob)
-    
+
     // Safety check: ensure we actually have a Blob-like object
     const blobToUpload = file.file_blob as Blob
     if (!(blobToUpload instanceof Blob)) {
-       console.error('file_blob is NOT a Blob instance. It might have been corrupted or serialized incorrectly.', typeof file.file_blob);
-       // If it's a plain object with blob-like properties, we might be able to recover it
-       if (file.file_blob && (file.file_blob as any).size) {
-           console.log('Attempting to recover blob from object properties...');
-       }
+      console.error('file_blob is NOT a Blob instance. It might have been corrupted or serialized incorrectly.', typeof file.file_blob);
+      // If it's a plain object with blob-like properties, we might be able to recover it
+      if (file.file_blob && (file.file_blob as any).size) {
+        console.log('Attempting to recover blob from object properties...');
+      }
     }
 
     try {
       await uploadMedia({
         file: blobToUpload,
-        name: file.filename,
+        name: getValidFilename(file.filename),
         context,
         blurhash: file.blurhash,
         aspect_ratio: file.aspect_ratio,
@@ -350,7 +441,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
             const up = m.files.map((f: MediaFile) =>
               f.file_id === file.file_id ? { ...f, status: 'failed' as const } : f
             )
-            const allAttempted = up.every(f => f.status !== 'uploading' && f.status !== 'processing')
+
             await table.update(messageId, { files: up })
           }
           activeUploads.current.delete(file.file_id)

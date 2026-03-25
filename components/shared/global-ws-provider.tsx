@@ -460,10 +460,21 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         const chat = await db.chatlist.filter(c =>
                             (c.direct_message?.id === directMessageId)
                         ).first();
-                        if (!existing && chat) {
-                            await db.directmessagechats.put(
-                                directChatMessage,
-                            );
+
+                        if (chat) {
+                            if (existing) {
+                                console.log('Updating existing direct message:', directChatMessage.id);
+                                await db.directmessagechats.put({
+                                    ...existing,
+                                    ...directChatMessage,
+                                    // Preserve local files (with URLs) if handleMediaReady already processed them
+                                    files: existing.files && existing.files.length > 0 ? existing.files : directChatMessage.files,
+                                    isOptimistic: false,
+                                });
+                            } else {
+                                console.log('Inserting new direct message:', directChatMessage.id);
+                                await db.directmessagechats.put(directChatMessage);
+                            }
                         }
                     } else if (groupChatId) {
                         const groupChatMessage = message as GroupMessageChats;
@@ -485,10 +496,21 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         const chat = await db.chatlist.filter(c =>
                             (c.group_chat?.id === groupChatId)
                         ).first();
-                        if (!existing && chat) {
-                            await db.groupmessagechats.put(
-                                groupChatMessage,
-                            );
+
+                        if (chat) {
+                            if (existing) {
+                                console.log('Updating existing group message:', groupChatMessage.id);
+                                await db.groupmessagechats.put({
+                                    ...existing,
+                                    ...groupChatMessage,
+                                    // Preserve local files (with URLs) if handleMediaReady already processed them
+                                    files: existing.files && existing.files.length > 0 ? existing.files : groupChatMessage.files,
+                                    isOptimistic: false,
+                                });
+                            } else {
+                                console.log('Inserting new group message:', groupChatMessage.id);
+                                await db.groupmessagechats.put(groupChatMessage);
+                            }
                         }
                     }
                 } catch (error) {

@@ -13,6 +13,20 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Converts a string to a clean filename:
+ * - Strips leading/trailing spaces
+ * - Replaces internal spaces with underscores
+ * - Removes any character that is not alphanumeric, dash, underscore, or dot
+ */
+export function getValidFilename(name: string): string {
+  return name
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_\-.]/g, "");
+}
+
+
+/**
  * Humanizes a date based on the following criteria:
  * - If the date is today: show only the time (e.g., "01:30 AM")
  * - If the date is yesterday: show "Yesterday"

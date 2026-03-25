@@ -60,6 +60,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
 import { useTypingStore } from "@/lib/stores/typing-store";
 import { motion, AnimatePresence } from "framer-motion";
+import { FileText, Image as ImageIcon, Video, Mic, Headphones } from "lucide-react";
 
 export const SecondarySidebar = () => {
   const hasFetched = React.useRef(false);
@@ -117,7 +118,7 @@ export const SecondarySidebar = () => {
       }
 
       // 4. Multi-level sort: Pinned > Drafts > Recency
-      return combined.sort((a, b) => {
+      const result = combined.sort((a, b) => {
         if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
 
         const idA = a.direct_message?.id || a.group_chat?.id;
@@ -136,6 +137,28 @@ export const SecondarySidebar = () => {
 
         return timeB - timeA;
       });
+
+      // 5. Enhance with latest message info (join with message tables)
+      for (const chat of result) {
+        const lastMsgId = chat.direct_message?.recent_content_id || chat.group_chat?.recent_content_id;
+        if (lastMsgId) {
+          const lastMsg = chat.group_chat
+            ? await db.groupmessagechats.get(lastMsgId)
+            : await db.directmessagechats.get(lastMsgId);
+
+          if (lastMsg) {
+            if (chat.direct_message) {
+              chat.direct_message.recent_files = lastMsg.files;
+              chat.direct_message.recent_message_type = lastMsg.type;
+            } else if (chat.group_chat) {
+              chat.group_chat.recent_files = lastMsg.files;
+              chat.group_chat.recent_message_type = lastMsg.type;
+            }
+          }
+        }
+      }
+
+      return result;
     },
     [page, activeChatId, activeChatLatchedDraft, activeChatLatchedDraftTime]
   );
@@ -454,30 +477,75 @@ export const SecondarySidebar = () => {
                               // ── Normal recent content ─────────────────────────────────
                               return (
                                 <>
-                                  {chat.direct_message && chat.group_chat === null && (currentUser?.id === chat.direct_message.recent_user_id ? (
-                                    <span className="inline-flex space-x-1">
-                                      <span>
-                                        {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date && !chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                  {(() => {
+                                    const obj = chat.direct_message || chat.group_chat;
+                                    if (!obj) return null;
+
+                                    const content = obj.recent_content;
+                                    const files = obj.recent_files;
+                                    const type = obj.recent_message_type;
+                                    const isMine = currentUser?.id === obj.recent_user_id;
+
+                                    // Receipt logic
+                                    const renderReceipt = () => {
+                                      if (!isMine) return null;
+                                      if (chat.direct_message) {
+                                        return (
+                                          <span className="shrink-0 -mt-0.5">
+                                            {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span className="shrink-0 relative -mt-0.5 flex items-center">
+                                          {chat.group_chat?.receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.group_chat?.receipt === "delivered" ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
+                                        </span>
+                                      );
+                                    };
+
+                                    const senderPrefix = !isMine && chat.group_chat?.recent_user_display_name ? <span>{chat.group_chat.recent_user_display_name}:{" "}</span> : isMine && chat.group_chat ? <span>You:{" "}</span> : null;
+
+                                    if (files && files.length > 0) {
+                                      const lastFile = files[files.length - 1];
+                                      const fileType = lastFile.type;
+                                      let IconComp: any = ImageIcon;
+                                      let label = "Photo";
+
+                                      if (fileType === 'video') {
+                                        IconComp = Video;
+                                        label = "Video";
+                                      } else if (fileType === 'audio') {
+                                        IconComp = type === 'voice' ? Mic : Headphones;
+                                        label = type === 'voice' ? "Voice message" : "Audio";
+                                      } else if (fileType !== 'image') {
+                                        IconComp = FileText;
+                                        label = "Document";
+                                      }
+
+                                      const fileCount = files.length;
+                                      const caption = lastFile.caption || label;
+
+                                      return (
+                                        <span className="flex items-center gap-1 w-full truncate">
+                                          {renderReceipt()}
+                                          {senderPrefix}
+                                          <span className="flex items-center gap-1 truncate">
+                                            <IconComp size={16} className={cn("shrink-0")} />
+                                            <span className="truncate">{caption}</span>
+                                            {fileCount > 1 && <span className="font-medium ml-0.5">{fileCount}</span>}
+                                          </span>
+                                        </span>
+                                      );
+                                    }
+
+                                    return (
+                                      <span className="flex items-center gap-1 w-full truncate">
+                                        {renderReceipt()}
+                                        {senderPrefix}
+                                        <span className="truncate">{content}</span>
                                       </span>
-                                      <span>{chat.direct_message?.recent_content}</span>
-                                    </span>
-                                  )
-                                    : (<span>{chat.direct_message?.recent_content}</span>)
-                                  )}
-                                  {chat.group_chat && chat.direct_message === null && (
-                                    <>
-                                      {chat.group_chat.recent_content && (
-                                        currentUser?.id === chat.group_chat.recent_user_id ? (
-                                          <>
-                                            <span className="inline-flex absolute space-x-3">
-                                              {chat.group_chat.receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.group_chat.receipt === "delivered" ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
-                                            </span>
-                                            <span className="pl-5">You:{" "}</span>
-                                          </>) : (<span>{chat.group_chat.recent_user_display_name}:{" "}</span>)
-                                      )}
-                                      <span>{chat.group_chat.recent_content}</span>
-                                    </>
-                                  )}
+                                    );
+                                  })()}
                                 </>
                               );
                             })()}
@@ -497,7 +565,7 @@ export const SecondarySidebar = () => {
                           {
                             chat?.group_chat && (
                               <span>
-                                {chat.group_chat?.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat.unread_messages}</Badge>}
+                                {(chat.group_chat?.unread_messages ?? 0) > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat?.unread_messages}</Badge>}
                               </span>
                             )}
                           <div className="hidden group-hover:flex">

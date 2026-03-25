@@ -1,5 +1,8 @@
 import { axiosInstance } from "../axios"
 import { UploadContext } from "../../types/mediaTypes"
+import { getMediaType } from "../../hooks/use-media-upload"
+import { getValidFilename } from "../utils"
+
 
 interface UploaderOptions {
   file: File | Blob
@@ -20,9 +23,10 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export async function uploadMedia(options: UploaderOptions) {
   const { file, name, context, blurhash, aspect_ratio, onProgress, onComplete, onError, signal } = options
-  console.log("options", options)
-  const fileName = name || (file as File).name || 'file'
-  const fileType = (file as File).type || 'application/octet-stream'
+  const fileName = getValidFilename(name || (file as File).name || 'file')
+  const mimeType = (file as File).type || 'application/octet-stream'
+
+  const mediaType = getMediaType(file.type)
 
   try {
     if (typeof file.size === 'undefined') {
@@ -35,7 +39,9 @@ export async function uploadMedia(options: UploaderOptions) {
       console.log('Single upload file:', file, 'size:', file.size, 'type:', file.type)
       formData.append('file', file, fileName)
       formData.append('filename', fileName)
-      formData.append('mime_type', fileType)
+      formData.append('mime_type', mimeType)
+      formData.append('file_size', String(file.size))
+      formData.append('media_type', mediaType)
       if (blurhash) formData.append('blurhash', blurhash)
       if (aspect_ratio) formData.append('aspect_ratio', String(aspect_ratio))
       if (context.caption) formData.append('caption', context.caption)
@@ -66,7 +72,8 @@ export async function uploadMedia(options: UploaderOptions) {
       // 1. Initiate
       const initiateResponse = await axiosInstance.post('media/upload/initiate/', {
         filename: fileName,
-        mime_type: fileType,
+        mime_type: mimeType,
+        media_type: mediaType,
         total_size: file.size,
         total_chunks: totalChunks,
         blurhash,
@@ -118,3 +125,4 @@ export async function uploadMedia(options: UploaderOptions) {
     onError(error.message || 'Upload failed')
   }
 }
+

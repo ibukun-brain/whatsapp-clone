@@ -1,5 +1,7 @@
 import { axiosInstance } from "./axios";
 import { Attachment } from "@/types";
+import { getValidFilename } from "./utils";
+
 
 const UPLOAD_ENDPOINT = "/api/messages/attachments/upload/";
 
@@ -29,14 +31,16 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("file_name", file.name);
+    formData.append("file_name", getValidFilename(file.name));
+
     formData.append("file_size", String(file.size));
     formData.append("file_type", isPdf ? "pdf" : file.type);
     formData.append("page_count", String(pageCount));
 
     if (thumbnail) {
-        formData.append("thumbnail", thumbnail, `${file.name}_thumb.jpg`);
+        formData.append("thumbnail", thumbnail, `${getValidFilename(file.name)}_thumb.jpg`);
     }
+
 
     const response = await axiosInstance.post<Attachment>(
         UPLOAD_ENDPOINT,

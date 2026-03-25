@@ -237,13 +237,17 @@ const FileUploadPreview = ({
             <div className="bg-white px-6 py-3 flex flex-col gap-3">
                 {/* Caption Input + Send */}
                 <div className="max-w-3xl mx-auto w-full flex items-center gap-3">
-                    <div className="bg-white rounded-lg px-3 py-2 flex-1 flex items-center gap-2 shadow-sm">
-                        <input
-                            type="text"
-                            placeholder="Type a message"
-                            className="flex-1 bg-transparent border-none outline-none text-[15px] text-[#111b21] placeholder-[#8696a0]"
+                    <div className="bg-white rounded-lg px-3 py-2 flex-1 flex items-center gap-2 shadow-sm border border-[#e9edef]">
+                        <textarea
+                            placeholder="Add a caption"
+                            className="flex-1 bg-transparent border-none outline-none text-[15px] text-[#111b21] placeholder-[#8696a0] resize-none py-1 min-h-[24px] max-h-[120px] leading-tight"
+                            rows={1}
                             value={captions[currentIndex] || ""}
-                            onChange={(e) => handleCaptionChange(e.target.value)}
+                            onChange={(e) => {
+                                handleCaptionChange(e.target.value);
+                                e.target.style.height = "auto";
+                                e.target.style.height = e.target.scrollHeight + "px";
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter" && !e.shiftKey) {
                                     e.preventDefault();
@@ -251,7 +255,7 @@ const FileUploadPreview = ({
                                 }
                             }}
                         />
-                        <EmojiIcon className="w-6 h-6 text-[#8696a0] cursor-pointer hover:text-[#54656f] transition-colors" />
+                        <EmojiIcon className="w-6 h-6 text-[#8696a0] cursor-pointer hover:text-[#54656f] transition-colors shrink-0" />
                     </div>
 
                     {/* Send Button */}

@@ -32,16 +32,16 @@ import { toast } from "sonner";
 
 import { Clock, AlertCircle } from "lucide-react";
 
-const ReadReceipt = ({ 
-    read_date, 
-    delivered_date, 
-    receipt, 
-    isOptimistic, 
-    files 
-}: { 
-    read_date?: Date, 
-    delivered_date?: Date, 
-    receipt?: "sent" | "delivered" | "read" | "failed", 
+const ReadReceipt = ({
+    read_date,
+    delivered_date,
+    receipt,
+    isOptimistic,
+    files
+}: {
+    read_date?: Date,
+    delivered_date?: Date,
+    receipt?: "sent" | "delivered" | "read" | "failed",
     isOptimistic?: boolean,
     files?: MediaFile[]
 }) => {
@@ -61,12 +61,12 @@ const ReadReceipt = ({
     if (isOptimistic) {
         return <Clock className="h-3 w-3 text-[#8696a0]" />;
     }
-    
+
     return (
-        read_date || receipt === "read" 
-            ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> 
-            : (delivered_date && !read_date) || receipt === "delivered" 
-                ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" /> 
+        read_date || receipt === "read"
+            ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" />
+            : (delivered_date && !read_date) || receipt === "delivered"
+                ? <CheckIcon2 height={18} width={18} className="text-[#8696a0]" />
                 : <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />
     )
 }
@@ -86,7 +86,7 @@ const MessageBubble = ({
     onShowInfo?: (msg: GroupMessageChats) => void,
     onRetryMessage?: (msg: DirectMessageChats | GroupMessageChats) => void
 }) => {
-    const isMine = isDM ? msg.user === currentUser.id : (msg.user as User).id === currentUser.id;
+    const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
     const { time } = getDateTimeByTimezone(msg.timestamp, currentUser.timezone);
     const alignClass = isMine ? "justify-end" : "justify-start";
 
@@ -105,7 +105,7 @@ const MessageBubble = ({
     const reactionItems = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
     const MessageContextMenu = ({ children }: { children: React.ReactNode }) => {
-        const senderName = !isMine ? (isDM ? "Contact" : (msg.user as User).display_name) : null;
+        const senderName = !isMine ? (isDM ? "Contact" : (msg.user as User)?.display_name || "Unknown") : null;
 
         return (
             <ContextMenu>
@@ -207,8 +207,13 @@ const MessageBubble = ({
     };
 
     const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
-    const { upload, cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
+    const { cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
+    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video');
 
+    const messageStatusKey = `${msg.isOptimistic}-${msg.content ? 'hasContent' : 'noContent'}-${isDM
+            ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))
+            : (msg as GroupMessageChats).receipt
+        }-${(msg as any).receipt || 'none'}`;
 
     return (
         <>
@@ -221,15 +226,6 @@ const MessageBubble = ({
                             msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1 pb-0" : "px-1 py-1"
                         )}>
                             <div className="flex flex-col">
-                                {/* Standard Attachments (PDFs) */}
-                                {msg.attachments && msg.attachments.length > 0 && (
-                                    <div className="flex flex-col gap-1 mb-1">
-                                        {(msg.attachments as Attachment[]).map((att: Attachment) => (
-                                            <PdfAttachmentPreview key={att.id} attachment={att} />
-                                        ))}
-                                    </div>
-                                )}
-
                                 {/* New Media Grid */}
                                 {msg.files && msg.files.length > 0 && (
                                     <div className="mb-1">
@@ -237,8 +233,9 @@ const MessageBubble = ({
                                             files={msg.files as MediaFile[]}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
-                                            timestamp={!msg.content ? time : undefined}
-                                            receipt={!msg.content && isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} {...(isDM ? { read_date: (msg as DirectMessageChats)?.read_date, delivered_date: (msg as DirectMessageChats)?.delivered_date } : { receipt: (msg as GroupMessageChats).receipt })} /> : undefined}
+                                            timestamp={time}
+                                            receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
+                                            messageStatus={messageStatusKey}
                                         />
                                     </div>
                                 )}
@@ -249,21 +246,22 @@ const MessageBubble = ({
                                     </p>
                                 )}
 
-                                {(!(msg.files && msg.files.length > 0 && !(msg.content))) && (
+                                {(!hasVisuals || msg.content) && (
                                     <div className="flex items-center justify-end gap-1">
                                         {(msg as any).receipt === 'failed' && (
-                                           <button 
-                                             onClick={() => onRetryMessage?.(msg)}
-                                             className="hover:scale-110 transition-transform"
-                                             title="Retry sending"
-                                           >
-                                             <AlertCircle className="h-4 w-4 text-red-500" />
-                                           </button>
+                                            <button
+                                                onClick={() => onRetryMessage?.(msg)}
+                                                className="hover:scale-110 transition-transform"
+                                                title="Retry sending"
+                                            >
+                                                <AlertCircle className="h-4 w-4 text-red-500" />
+                                            </button>
                                         )}
                                         <span className={`text-[11px] ${metaColor} leading-none`}>{time}</span>
                                         {isMine && <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} />}
                                     </div>
                                 )}
+
                             </div>
                         </div>
                     </MessageContextMenu>
@@ -299,9 +297,12 @@ const MessageBubble = ({
                                             files={msg.files as MediaFile[]}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
-                                            timestamp={!msg.content ? time : undefined}
-                                            receipt={!msg.content && isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
+                                            timestamp={time}
+                                            receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
+                                            messageStatus={messageStatusKey}
                                         />
+
+
                                     </div>
                                 )}
 
@@ -311,21 +312,22 @@ const MessageBubble = ({
                                     </p>
                                 )}
 
-                                {(!(msg.files && msg.files.length > 0 && !msg.content)) && (
+                                {(!hasVisuals || msg.content) && (
                                     <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5 h-4">
                                         {(msg as any).receipt === 'failed' && (
-                                           <button 
-                                             onClick={() => onRetryMessage?.(msg)}
-                                             className="hover:scale-110 transition-transform"
-                                             title="Retry sending"
-                                           >
-                                             <AlertCircle className="h-4 w-4 text-red-500" />
-                                           </button>
+                                            <button
+                                                onClick={() => onRetryMessage?.(msg)}
+                                                className="hover:scale-110 transition-transform"
+                                                title="Retry sending"
+                                            >
+                                                <AlertCircle className="h-4 w-4 text-red-500" />
+                                            </button>
                                         )}
                                         <span className={`text-[11px] ${metaColor} leading-none`}>{time}</span>
                                         {isMine && <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />}
                                     </div>
                                 )}
+
                             </div>
                         </div>
                     </MessageContextMenu>
@@ -335,4 +337,4 @@ const MessageBubble = ({
     );
 };
 
-export default MessageBubble;
+export default React.memo(MessageBubble);
