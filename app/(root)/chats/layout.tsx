@@ -13,9 +13,10 @@ export default function RootLayout({
   return (
     <GlobalWsProvider>
       <SidebarProvider
+        className="lg:[--sidebar-width-dynamic:429px] xl:[--sidebar-width-dynamic:629px]"
         style={
           {
-            "--sidebar-width": "629px",
+            "--sidebar-width": "var(--sidebar-width-dynamic, 429px)",
           } as React.CSSProperties
         }
       >

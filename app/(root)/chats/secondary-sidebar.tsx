@@ -254,7 +254,7 @@ export const SecondarySidebar = () => {
   return (
     <Sidebar
       collapsible="none"
-      className="bg-sidebar-primary hidden flex-1 md:flex "
+      className="bg-sidebar-primary hidden flex-1 md:flex"
     >
       <SidebarHeader className="gap-3 px-5 pt-3 pb-0">
         <div className="flex w-full items-center justify-between">
@@ -265,12 +265,13 @@ export const SecondarySidebar = () => {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="w-10 h-10 rounded-full hover:bg-muted/30  hover:cursor-pointer"
-                    onClick={() => setContactSheetOpen(true)}
-                  >
-                    <div>
+                  <div className="w-fit h-fit inline-flex">
+                    <Button
+                      variant="ghost"
+                      className="w-10 h-10 rounded-full hover:bg-muted/30 hover:cursor-pointer"
+                      onClick={() => setContactSheetOpen(true)}
+                      suppressHydrationWarning
+                    >
                       <NewChatIcon
                         style={{
                           width: "24px",
@@ -278,8 +279,8 @@ export const SecondarySidebar = () => {
                           color: "#000",
                         }}
                       />
-                    </div>
-                  </Button>
+                    </Button>
+                  </div>
                 </TooltipTrigger>
                 <TooltipContent className="text-white border-none">
                   <p>
@@ -299,12 +300,13 @@ export const SecondarySidebar = () => {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        className="w-10 h-10 rounded-full hover:bg-muted/30 hover:cursor-pointer focus-visible:ring-0 focus-visible:ring-offset-0"
-                      >
-                        <div>
+                    <div className="w-fit h-fit inline-flex">
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          className="w-10 h-10 rounded-full hover:bg-muted/30 hover:cursor-pointer focus-visible:ring-0 focus-visible:ring-offset-0"
+                          suppressHydrationWarning
+                        >
                           <MenuIcon
                             style={{
                               width: "24px",
@@ -312,9 +314,9 @@ export const SecondarySidebar = () => {
                               color: "#000",
                             }}
                           />
-                        </div>
-                      </Button>
-                    </DropdownMenuTrigger>
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </div>
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>Menu</p>
@@ -325,7 +327,7 @@ export const SecondarySidebar = () => {
                 align="start"
                 className="text-secondary-foreground cursor-pointer w-[180px]"
               >
-                <DropdownMenuItem className="px-3 rounded-xl]">
+                <DropdownMenuItem className="px-3 rounded-xl">
                   <CreateGroupIcon
                     className="text-secondary-foreground"
                     style={{ width: "18px", height: "18px" }}
@@ -523,16 +525,20 @@ export const SecondarySidebar = () => {
                                       }
 
                                       const fileCount = files.length;
-                                      const caption = lastFile.caption || label;
+                                      const isMultiple = fileCount > 1;
+                                      const caption = isMultiple ? "" : (lastFile.caption || label);
 
                                       return (
                                         <span className="flex items-center gap-1 w-full truncate">
                                           {renderReceipt()}
                                           {senderPrefix}
-                                          <span className="flex items-center gap-1 truncate">
+                                          <span className="flex items-center gap-1 truncate text-muted-foreground">
                                             <IconComp size={16} className={cn("shrink-0")} />
-                                            <span className="truncate">{caption}</span>
-                                            {fileCount > 1 && <span className="font-medium ml-0.5">{fileCount}</span>}
+                                            {isMultiple ? (
+                                              <span className="font-medium">{label}{" "}{fileCount}</span>
+                                            ) : (
+                                              <span className="truncate">{caption}</span>
+                                            )}
                                           </span>
                                         </span>
                                       );

@@ -5,6 +5,7 @@ import { MediaFile } from '@/types/mediaTypes'
 interface FileMessageProps {
   file: MediaFile
   onRetry?: () => void
+  timestamp?: string
 }
 
 function getFileIcon(type: MediaFile['type'], mimeType: string) {
@@ -42,7 +43,7 @@ function formatFileSize(bytes: number) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-function FileMessageComp({ file, onRetry }: FileMessageProps) {
+function FileMessageComp({ file, onRetry, timestamp }: FileMessageProps) {
   const isReady = file.status === 'ready'
 
   return (
@@ -64,6 +65,12 @@ function FileMessageComp({ file, onRetry }: FileMessageProps) {
           <span>{getFormatLabel(file.type, file.mime_type)}</span>
           <span>•</span>
           <span>{formatFileSize(file.file_size)}</span>
+          {timestamp && (
+            <>
+              <span>•</span>
+              <span className="uppercase">{timestamp}</span>
+            </>
+          )}
         </div>
         
         {file.status === 'uploading' && (
@@ -111,6 +118,7 @@ export default memo(FileMessageComp, (prev, next) => {
     prev.file.file_id === next.file.file_id &&
     prev.file.status === next.file.status &&
     prev.file.progress === next.file.progress &&
-    prev.file.media_url === next.file.media_url
+    prev.file.media_url === next.file.media_url &&
+    prev.timestamp === next.timestamp
   )
 })

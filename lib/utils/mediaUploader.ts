@@ -45,6 +45,7 @@ export async function uploadMedia(options: UploaderOptions) {
       if (blurhash) formData.append('blurhash', blurhash)
       if (aspect_ratio) formData.append('aspect_ratio', String(aspect_ratio))
       if (context.caption) formData.append('caption', context.caption)
+      if (context.client_file_id) formData.append('client_file_id', context.client_file_id)
 
       if (context.client_msg_id) formData.append('client_msg_id', context.client_msg_id)
       if (context.chat_type === 'directmessage') {
@@ -80,6 +81,7 @@ export async function uploadMedia(options: UploaderOptions) {
         aspect_ratio,
         caption: context.caption,
         client_msg_id: context.client_msg_id,
+        client_file_id: context.client_file_id,
         [context.chat_type === 'directmessage' ? 'direct_message_id' : 'chatgroup_id']: context.context_id
       }, { signal })
 

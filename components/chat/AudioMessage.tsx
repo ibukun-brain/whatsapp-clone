@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 interface AudioMessageProps {
   file: MediaFile
   onRetry?: () => void
+  timestamp?: string
 }
 
 function formatDuration(seconds: number = 0) {
@@ -14,7 +15,7 @@ function formatDuration(seconds: number = 0) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function AudioMessageComp({ file, onRetry }: AudioMessageProps) {
+function AudioMessageComp({ file, onRetry, timestamp }: AudioMessageProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(file.duration || 0)
@@ -156,6 +157,7 @@ function AudioMessageComp({ file, onRetry }: AudioMessageProps) {
                  {isPlaying ? formatDuration(currentTime) : formatDuration(duration)}
                </span>
                {(file.mime_type ?? '').split('/')[1]?.toUpperCase() || 'AUDIO'} • {((file.file_size || 0) / 1024 / 1024).toFixed(1)}MB
+               {timestamp && <span className="ml-auto inline-flex items-center gap-1.5">{timestamp}</span>}
              </>
            )}
         </div>
@@ -169,6 +171,7 @@ export default memo(AudioMessageComp, (prev, next) => {
     prev.file.file_id === next.file.file_id &&
     prev.file.status === next.file.status &&
     prev.file.progress === next.file.progress &&
-    prev.file.media_url === next.file.media_url
+    prev.file.media_url === next.file.media_url &&
+    prev.timestamp === next.timestamp
   )
 })

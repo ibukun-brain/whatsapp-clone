@@ -34,8 +34,11 @@ export function getValidFilename(name: string): string {
  * @param userTimezone - An IANA timezone string (e.g., "Africa/Lagos", "America/New_York").
  * - Otherwise: show the date (e.g., "02/06/2026")
  */
-export function humanizeDate(datetime: Date | string, userTimezone: string): string {
+export function humanizeDate(datetime: Date | string | null | undefined, userTimezone: string): string {
+  if (!datetime) return "";
   const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+  if (isNaN(inputDate.getTime())) return "";
+
   const now = new Date();
 
   // Get start of today (midnight)
@@ -78,10 +81,12 @@ export function humanizeDate(datetime: Date | string, userTimezone: string): str
  * @returns An object `{ date, time }` that can be destructured.
  */
 export function getDateTimeByTimezone(
-  datetime: Date | string,
+  datetime: Date | string | null | undefined,
   userTimezone: string
 ): { date: string; time: string } {
+  if (!datetime) return { date: "", time: "" };
   const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+  if (isNaN(inputDate.getTime())) return { date: "", time: "" };
 
   const time = inputDate.toLocaleTimeString("en-US", {
     timeZone: userTimezone,
@@ -113,10 +118,12 @@ export function getDateTimeByTimezone(
  * @returns A date-only key string suitable for use as a separator label.
  */
 export function getDateLabel(
-  datetime: Date | string,
+  datetime: Date | string | null | undefined,
   userTimezone: string
 ): string {
+  if (!datetime) return "";
   const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+  if (isNaN(inputDate.getTime())) return "";
 
   // Get the date parts in the user's timezone
   const msgParts = new Intl.DateTimeFormat("en-US", {
@@ -174,10 +181,12 @@ export function getDateLabel(
  * - Older: "on 02/06/2026 at 1:27pm"
  */
 export function formatDatetime(
-  datetime: Date | string,
+  datetime: Date | string | null | undefined,
   userTimezone: string = "UTC"
 ): string {
+  if (!datetime) return "";
   const inputDate = typeof datetime === "string" ? new Date(datetime) : datetime;
+  if (isNaN(inputDate.getTime())) return "";
   const now = new Date();
 
   // Get parts in user timezone

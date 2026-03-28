@@ -12,9 +12,10 @@ interface ImageMessageProps {
   onCancel?: () => void
   timestamp?: string
   receipt?: React.ReactNode
+  fill?: boolean
 }
 
-function ImageMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt }: ImageMessageProps) {
+function ImageMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt, fill }: ImageMessageProps) {
   const isReady = file.status === 'ready'
   const [isLoaded, setIsLoaded] = useState(isReady) // Start as loaded if already ready
   const [serverLoaded, setServerLoaded] = useState(false)
@@ -48,8 +49,8 @@ function ImageMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt 
 
   return (
     <div
-      className="relative overflow-hidden rounded-lg bg-gray-200 group/image"
-      style={{ width: `${width}px`, height: `${height}px` }}
+      className="relative overflow-hidden bg-gray-200 group/image"
+      style={fill ? { width: '100%', height: '100%' } : { width: `${width}px`, height: `${height}px` }}
     >
       {/* Layer 1: Blurhash — shown when not ready OR failed */}
       {file.blurhash && (file.status !== 'ready' || !isLoaded) && (
@@ -160,7 +161,8 @@ export default memo(ImageMessageComp, (prev, next) => {
     prev.file.media_url === next.file.media_url &&
     prev.file.caption === next.file.caption &&
     prev.timestamp === next.timestamp &&
-    prev.receipt === next.receipt
+    prev.receipt === next.receipt &&
+    prev.fill === next.fill
   );
   if (!same) console.log("ImageMessage memo fail", prev.file.file_id);
   return same;

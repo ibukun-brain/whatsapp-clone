@@ -87,7 +87,8 @@ const MessageBubble = ({
     onRetryMessage?: (msg: DirectMessageChats | GroupMessageChats) => void
 }) => {
     const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
-    const { time } = getDateTimeByTimezone(msg.timestamp, currentUser.timezone);
+    const displayTimestamp = (msg.files && msg.files.length > 0) ? msg.files[0].timestamp : msg.timestamp;
+    const { time } = getDateTimeByTimezone(displayTimestamp, currentUser.timezone);
     const alignClass = isMine ? "justify-end" : "justify-start";
 
     // Tail styling
@@ -211,8 +212,8 @@ const MessageBubble = ({
     const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video');
 
     const messageStatusKey = `${msg.isOptimistic}-${msg.content ? 'hasContent' : 'noContent'}-${isDM
-            ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))
-            : (msg as GroupMessageChats).receipt
+        ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))
+        : (msg as GroupMessageChats).receipt
         }-${(msg as any).receipt || 'none'}`;
 
     return (
@@ -234,7 +235,7 @@ const MessageBubble = ({
                                             isMine={isMine}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
-                                            timestamp={time}
+                                            userTimezone={currentUser.timezone}
                                             receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
                                             messageStatus={messageStatusKey}
                                         />
@@ -279,7 +280,7 @@ const MessageBubble = ({
                         <div className={cn(
                             "relative max-w-[72%] min-w-[200px] shadow-sm cursor-default group",
                             bubbleClass,
-                            msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1 pb-0" : "px-2.5 py-1 pb-0"
+                            msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1 pb-0" : "px-2.5 py-0.5"
                         )}>
                             <div className="flex flex-col">
                                 {/* Standard Attachments (PDFs) */}
@@ -299,7 +300,7 @@ const MessageBubble = ({
                                             isMine={isMine}
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
-                                            timestamp={time}
+                                            userTimezone={currentUser.timezone}
                                             receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
                                             messageStatus={messageStatusKey}
                                         />

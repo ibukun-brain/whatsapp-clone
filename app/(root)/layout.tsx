@@ -9,11 +9,12 @@ export default function RootLayout({
 }>) {
   return (
     <SidebarProvider
-      style={
-        {
-          "--sidebar-width": "629px",
-        } as React.CSSProperties
-      }
+    // className="w-100"
+    // style={
+    //   {
+    //     "--sidebar-width": "629px",
+    //   } as React.CSSProperties
+    // }
     >
       {children}
       <Toaster />

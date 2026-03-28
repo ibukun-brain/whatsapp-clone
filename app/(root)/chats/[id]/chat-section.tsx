@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import {
     MicrophoneIcon,
@@ -78,6 +78,69 @@ UnreadBanner.displayName = "UnreadBanner";
 
 // Stable empty array — re-exported from the store to avoid per-render allocation
 const EMPTY_TYPING_SET = EMPTY_TYPING;
+
+/**
+ * Groups consecutive media-only messages from the same user if sent within 5 minutes,
+ * provided the resulting group has more than 2 visual media items.
+ */
+const groupMediaMessages = (messages: any[]) => {
+    if (!messages.length) return [];
+
+    const processed: any[] = [];
+    let i = 0;
+
+    while (i < messages.length) {
+        const msg = messages[i];
+        // Only consider for grouping if it's purely visual media (no text content)
+        // Groups ONLY if messages are consecutive media-only. Any message with text breaks the chain.
+        const isMediaOnly = (m: any) =>
+            m.files &&
+            m.files.length > 0 &&
+            (!m.content || m.content.trim() === "") &&
+            m.files.every((f: any) => f.type === 'image' || f.type === 'video');
+
+        if (!isMediaOnly(msg)) {
+            processed.push(msg);
+            i++;
+            continue;
+        }
+
+        const group: any[] = [msg];
+        let j = i + 1;
+        const msgUserId = (m: any) => typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
+        const firstUserId = msgUserId(msg);
+
+        while (j < messages.length) {
+            const nextMsg = messages[j];
+            const nextUserId = msgUserId(nextMsg);
+            const timeDiff = new Date(nextMsg.timestamp).getTime() - new Date(messages[j - 1].timestamp).getTime();
+
+            if (isMediaOnly(nextMsg) && nextUserId === firstUserId && timeDiff <= 5 * 60 * 1000) {
+                group.push(nextMsg);
+                j++;
+            } else {
+                break;
+            }
+        }
+
+        const totalVisuals = group.reduce((acc, m) => acc + m.files.length, 0);
+
+        if (group.length > 1 && totalVisuals > 2) {
+            // Merge files into a single synthetic message bubble
+            processed.push({
+                ...group[0],
+                files: group.flatMap(m => m.files),
+                groupedIds: group.map(m => m.id), // Store original IDs for reference
+            });
+            i = j;
+        } else {
+            // Keep as separate messages
+            processed.push(msg);
+            i++;
+        }
+    }
+    return processed;
+};
 
 const ChatSection = ({ chatId }: { chatId: string }) => {
     const directMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.direct_message?.id === chatId).first(), [chatId])
@@ -170,9 +233,43 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         externalUnreadCount,
     });
 
+    // ── Memoized Message Processing ─────────────────────────────────
+    const processedDirectMessages = useMemo(() => {
+        if (chatType !== "directmessage") return [];
+        const dbMessages = directMessageChats || [];
+        const combined = [...dbMessages];
+
+        localOptimisticMessages.forEach(optMsg => {
+            if ('direct_message_id' in optMsg && optMsg.direct_message_id === chatId) {
+                const exists = dbMessages.some(m => m.client_msg_id === optMsg.client_msg_id);
+                if (!exists) combined.push(optMsg as DirectMessageChats);
+            }
+        });
+
+        combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        return groupMediaMessages(combined);
+    }, [directMessageChats, localOptimisticMessages, chatId, chatType]);
+
+    const processedGroupMessages = useMemo(() => {
+        if (chatType !== "groupchat") return [];
+        const dbMessages = groupMessageChats || [];
+        const combined = [...dbMessages];
+
+        localOptimisticMessages.forEach(optMsg => {
+            if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
+                const exists = dbMessages.some(m => m.client_msg_id === optMsg.client_msg_id);
+                if (!exists) combined.push(optMsg as GroupMessageChats);
+            }
+        });
+
+        combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        return groupMediaMessages(combined);
+    }, [groupMessageChats, localOptimisticMessages, chatId, chatType]);
+
     // ── Scroll Manager Hook ──────────────────────────────────────────
-    const messages = chatType === "groupchat" ? groupMessageChats : directMessageChats;
-    const messagesLength = (messages?.length ?? 0) + localOptimisticMessages.length;
+    const messagesLength = chatType === "groupchat"
+        ? processedGroupMessages.length
+        : processedDirectMessages.length;
 
     const {
         scrollContainerRef,
@@ -361,25 +458,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             db.groupmessagechats.put(optimisticMsg as GroupMessageChats);
         }
 
-        const isConnected = readyState === ReadyState.OPEN;
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "send",
+                message: { text, client_msg_id: (optimisticMsg as any)?.client_msg_id },
+            },
+        });
 
-        if (isConnected) {
-            sendChatMessage({
-                type: chatType,
-                data: {
-                    action: "send",
-                    message: { text, client_msg_id: (optimisticMsg as any)?.client_msg_id },
-                },
-            });
-        } else {
-            console.log('Chat WebSocket not open, marking message as failed');
-            if (chatType === "directmessage") {
-                await db.directmessagechats.update(tempId, { status: "failed" });
-            } else {
-                await db.groupmessagechats.update(tempId, { receipt: "failed" });
-            }
-            toast.error("Message not sent. Check your connection.");
-        }
 
         // Clear input, draft, and stop typing indicator
         if (inputRef.current) {
@@ -725,34 +811,19 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
                         >
                             {/* direct message chats */}
-                            {currentUser && (() => {
-                                const dbMessages = directMessageChats || [];
-                                const combined = [...dbMessages];
-
-                                localOptimisticMessages.forEach(optMsg => {
-                                    if ('direct_message_id' in optMsg && optMsg.direct_message_id === chatId) {
-                                        const exists = dbMessages.some(m => m.content === optMsg.content && m.user === optMsg.user);
-                                        if (!exists) combined.push(optMsg as DirectMessageChats);
-                                    }
-                                });
-
-                                combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-                                if (combined.length === 0) return null;
-
-                                const firstUnreadId = unreadState.firstUnreadId;
+                            {currentUser && processedDirectMessages.length > 0 && (() => {
                                 const unreadCount = unreadState.unreadCount;
-
+                                const firstUnreadId = unreadState.firstUnreadId;
                                 let lastDateLabel = "";
 
-                                return combined.map((msg, index) => {
-                                    const prevMsg = index > 0 ? combined[index - 1] : null;
+                                return processedDirectMessages.map((msg, index) => {
+                                    const prevMsg = index > 0 ? processedDirectMessages[index - 1] : null;
                                     const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                     const showSeparator = dateLabel !== lastDateLabel;
                                     if (showSeparator) lastDateLabel = dateLabel;
                                     const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                     return (
-                                        <React.Fragment key={msg.client_msg_id || msg.id}>
+                                        <React.Fragment key={msg.id || msg.client_msg_id}>
                                             {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                             {showSeparator && <DateSeparator label={dateLabel} />}
                                             <MessageBubble
@@ -768,32 +839,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             })()}
 
                             {/* group message chats */}
-                            {currentUser && (() => {
-                                const dbMessages = groupMessageChats || [];
-                                const combined = [...dbMessages];
-
-                                localOptimisticMessages.forEach(optMsg => {
-                                    if ('groupchat_id' in optMsg && optMsg.groupchat_id === chatId) {
-                                        const exists = dbMessages.some(m => {
-                                            const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
-                                            const optUserId = typeof optMsg.user === 'object' && optMsg.user !== null ? (optMsg.user as User).id : (optMsg.user as unknown as string);
-                                            return m.content === optMsg.content && mUserId === optUserId;
-                                        });
-                                        if (!exists) combined.push(optMsg as GroupMessageChats);
-                                    }
-                                });
-
-                                combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-                                if (combined.length === 0) return null;
-
-                                const firstUnreadId = unreadState.firstUnreadId;
+                            {currentUser && processedGroupMessages.length > 0 && (() => {
                                 const unreadCount = unreadState.unreadCount;
-
+                                const firstUnreadId = unreadState.firstUnreadId;
                                 let lastDateLabel = "";
 
-                                return combined.map((msg, index) => {
-                                    const prevMsg = index > 0 ? combined[index - 1] : null;
+                                return processedGroupMessages.map((msg, index) => {
+                                    const prevMsg = index > 0 ? processedGroupMessages[index - 1] : null;
                                     const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
                                     const showSeparator = dateLabel !== lastDateLabel;
                                     if (showSeparator) lastDateLabel = dateLabel;

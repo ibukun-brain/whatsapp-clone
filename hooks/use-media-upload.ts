@@ -90,7 +90,6 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
   const handleMediaReady = useCallback(async ({ data }: MediaReadyEvent) => {
     console.log('Media Ready Event Received:', data)
     const table = data.chat_type === 'directmessage' ? db.directmessagechats : db.groupmessagechats
-    const files = data.files
     // Search both ID (temp or real)
     let message = await table.get(data.message_id)
     let currentId = data.message_id
@@ -99,9 +98,10 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       console.log('Message not found by message_id, searching by flags...')
       const allMessages = await table.toArray()
       message = (allMessages as any[]).find(m =>
-        (data.client_msg_id && m.client_msg_id === data.client_msg_id) ||
+        (m.client_msg_id === data.client_msg_id) ||
         m.files?.some((f: MediaFile) =>
-          f.filename === data.files.filename && f.file_size === data.files.file_size
+          (data.files.client_file_id && f.client_file_id === data.files.client_file_id) ||
+          (f.filename === data.files.filename && f.file_size === data.files.file_size)
         )
       )
       if (message) {
@@ -119,9 +119,9 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     }
 
     const updatedFiles = message.files.map((f: MediaFile) => {
-      // Find specific file by filename and size
-      const isMatch = f.filename === fileData.filename && f.file_size === fileData.file_size;
-      console.log('isMatch', isMatch, f.filename, fileData.filename, f.file_size, fileData.file_size)
+      // Find specific file primarily by client_file_id, fallback to filename and size
+      const isMatch = (data.files.client_file_id && f.client_file_id === data.files.client_file_id) || 
+                      (f.filename === fileData.filename && f.file_size === fileData.file_size);
       if (isMatch) {
         return {
           ...f,
@@ -182,6 +182,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     const mediaFilesWithOriginals = await Promise.all(files.map(async (file, index) => {
       const { blurhash, aspect_ratio, preview_url } = await computeBlurhash(file)
       const tempFileId = `${Date.now()}-${index}`
+      const clientFileId = `cfile-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`
       const mediaType: MediaFile['type'] = getMediaType(file.type)
 
       let duration: number | undefined
@@ -193,6 +194,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         originalFile: file,
         mediaFile: {
           file_id: tempFileId,
+          client_file_id: clientFileId,
           type: mediaType,
           status: 'uploading' as const,
           progress: 0,
@@ -263,7 +265,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       try {
         await uploadMedia({
           file: originalFile,
-          context: { ...context, caption: mediaFile.caption, client_msg_id: clientMsgId },
+          context: { ...context, caption: mediaFile.caption, client_msg_id: clientMsgId, client_file_id: mediaFile.client_file_id },
           blurhash: mediaFile.blurhash,
           aspect_ratio: mediaFile.aspect_ratio,
           signal: controller.signal,
@@ -392,6 +394,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       chat_type: chatType,
       context_id: chatType === 'directmessage' ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id,
       client_msg_id: clientMsgId,
+      client_file_id: file.client_file_id,
       caption: file.caption
     }
 

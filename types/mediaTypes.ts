@@ -3,6 +3,7 @@ export type MediaType = 'image' | 'video' | 'audio' | 'pdf' | 'word' | 'excel' |
 
 export interface MediaFile {
   file_id: string            // tempId during upload, real file_id after media.ready
+  client_file_id: string     // persistent client-side ID for mapping
   type: MediaType
   status: MediaStatus
   progress: number           // 0-100
@@ -28,6 +29,7 @@ export interface MediaReadyEvent {
     chat_type: 'directmessage' | 'group_chat'
     files: {
       file_id: string,
+      client_file_id: string,
       media_url: string
       thumbnail_url: string | null
       blurhash: string | null
@@ -45,5 +47,6 @@ export interface UploadContext {
   chat_type: 'directmessage' | 'group_chat'
   context_id: string  // chatgroup_id or direct_message_id
   client_msg_id?: string
+  client_file_id?: string
   caption?: string
 }

@@ -11,9 +11,10 @@ interface VideoMessageProps {
   onCancel?: () => void
   timestamp?: string
   receipt?: React.ReactNode
+  fill?: boolean
 }
 
-function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt }: VideoMessageProps) {
+function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt, fill }: VideoMessageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const isReady = file.status === 'ready'
 
@@ -44,8 +45,8 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt 
 
   return (
     <div 
-      className="relative overflow-hidden rounded-lg bg-black/10 group/video"
-      style={{ width: `${width}px`, height: `${height}px` }}
+      className="relative overflow-hidden bg-black/10 group/video"
+      style={fill ? { width: '100%', height: '100%' } : { width: `${width}px`, height: `${height}px` }}
     >
       {/* Background Layer: Blurhash */}
       {file.blurhash && (file.status !== 'ready') && (
@@ -160,6 +161,7 @@ export default memo(VideoMessageComp, (prev, next) => {
     prev.file.media_url === next.file.media_url &&
     prev.file.caption === next.file.caption &&
     prev.timestamp === next.timestamp &&
-    prev.receipt === next.receipt
+    prev.receipt === next.receipt &&
+    prev.fill === next.fill
   )
 })
