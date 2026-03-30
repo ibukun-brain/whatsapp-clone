@@ -6,7 +6,9 @@ import { getValidFilename } from "../utils"
 
 interface UploaderOptions {
   file: File | Blob
-  name?: string // Added explicit name
+  name?: string
+  mimeType?: string
+  mediaType?: string
   context: UploadContext
   blurhash?: string | null
   aspect_ratio?: number | null
@@ -22,11 +24,11 @@ const CHUNK_THRESHOLD = 1 * 1024 * 1024 // 1MB
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export async function uploadMedia(options: UploaderOptions) {
-  const { file, name, context, blurhash, aspect_ratio, onProgress, onComplete, onError, signal } = options
+  const { file, name, mimeType: overrideMimeType, mediaType: overrideMediaType, context, blurhash, aspect_ratio, onProgress, onComplete, onError, signal } = options
   const fileName = getValidFilename(name || (file as File).name || 'file')
-  const mimeType = (file as File).type || 'application/octet-stream'
+  const mimeType = overrideMimeType || (file as File).type || 'application/octet-stream'
 
-  const mediaType = getMediaType(file.type)
+  const mediaType = overrideMediaType || getMediaType(mimeType)
 
   try {
     if (typeof file.size === 'undefined') {

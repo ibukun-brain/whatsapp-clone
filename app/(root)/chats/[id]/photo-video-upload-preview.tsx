@@ -11,7 +11,7 @@ import { EmojiIcon } from "@/components/icons/chats-icon";
 interface PhotoVideoUploadPreviewProps {
     files: File[];
     onClose: () => void;
-    onSend: (files: File[], captions: Record<number, string>) => void;
+    onSend: (files: File[], captions: Record<number, string>, isDocument?: boolean) => void;
     onAddMore: () => void;
     onRemoveFile: (index: number) => void;
 }
@@ -183,7 +183,7 @@ const PhotoVideoUploadPreview = ({
                             onKeyDown={(e) => {
                                 if (e.key === "Enter" && !e.shiftKey) {
                                     e.preventDefault();
-                                    onSend(files, captions);
+                                    onSend(files, captions, false);
                                 }
                             }}
                         />
@@ -191,7 +191,7 @@ const PhotoVideoUploadPreview = ({
                     </div>
 
                     <button
-                        onClick={() => onSend(files, captions)}
+                        onClick={() => onSend(files, captions, false)}
                         className="w-11 h-11 bg-[#00a884] rounded-full flex items-center justify-center text-white shadow-md hover:bg-[#008f72] transition-colors shrink-0 cursor-pointer relative"
                     >
                         <Send size={18} className="ml-0.5" />

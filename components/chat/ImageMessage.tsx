@@ -142,7 +142,7 @@ function ImageMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
       {/* Timestamp Overlay */}
       {(timestamp || receipt) && (
         <div className={cn(
-          "absolute bottom-1 right-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-10",
+          "absolute bottom-1 right-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-10",
           !isReady ? "bg-black/30 backdrop-blur-sm" : ""
         )}>
           <span>{timestamp}</span>
@@ -164,6 +164,5 @@ export default memo(ImageMessageComp, (prev, next) => {
     prev.receipt === next.receipt &&
     prev.fill === next.fill
   );
-  if (!same) console.log("ImageMessage memo fail", prev.file.file_id);
   return same;
 })

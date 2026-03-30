@@ -4,12 +4,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { X, Plus, Send, FileText } from "lucide-react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
+import { getVideoMetadata } from "@/lib/utils/media-utils";
 import { EmojiIcon } from "@/components/icons/chats-icon";
 
 interface FileUploadPreviewProps {
     files: File[];
     onClose: () => void;
-    onSend: (files: File[], captions: Record<number, string>) => void;
+    onSend: (files: File[], captions: Record<number, string>, isDocument?: boolean) => void;
     onAddMore: () => void;
     onRemoveFile: (index: number) => void;
 }
@@ -87,9 +88,18 @@ const FileUploadPreview = ({
                         pdfThumb = await renderPdfFirstPage(url);
                     }
 
+                    let type = file.type;
+                    if (type.startsWith("video/")) {
+                        const meta = await getVideoMetadata(file);
+                        if (meta.width === 0 && meta.height === 0) {
+                            console.log('Video mime type has no dimensions in preview — treating as audio.');
+                            type = "audio/mpeg"; // or some audio mime type
+                        }
+                    }
+
                     return {
                         url,
-                        type: file.type,
+                        type,
                         name: file.name,
                         size: file.size,
                         ext,
@@ -129,7 +139,18 @@ const FileUploadPreview = ({
     const currentFile = previews[currentIndex];
 
     const handleSend = () => {
-        onSend(files, captions);
+        // Construct new File objects with corrected types if they were changed during preview generation
+        const correctedFiles = files.map((file, idx) => {
+            const preview = previews[idx];
+            if (preview && preview.type !== file.type) {
+                return new File([file], file.name, {
+                    type: preview.type,
+                    lastModified: file.lastModified,
+                });
+            }
+            return file;
+        });
+        onSend(correctedFiles, captions, true);
     };
 
     const handleCaptionChange = (value: string) => {

@@ -1,5 +1,5 @@
 export type MediaStatus = 'uploading' | 'processing' | 'ready' | 'failed'
-export type MediaType = 'image' | 'video' | 'audio' | 'pdf' | 'word' | 'excel' | 'powerpoint' | 'access' | 'archive' | 'file'
+export type MediaType = 'image' | 'video' | 'audio' | 'pdf' | 'word' | 'excel' | 'powerpoint' | 'access' | 'archive' | 'file' | 'document'
 
 export interface MediaFile {
   file_id: string            // tempId during upload, real file_id after media.ready
@@ -49,4 +49,5 @@ export interface UploadContext {
   client_msg_id?: string
   client_file_id?: string
   caption?: string
+  forceDocument?: boolean
 }

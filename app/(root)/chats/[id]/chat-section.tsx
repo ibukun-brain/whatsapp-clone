@@ -27,11 +27,13 @@ import { CheckIcon2 as CheckIcon2_ } from "@/components/icons/chats-icon";
 import { useUnreadMessages } from "@/hooks/use-unread-messages";
 import FileUploadPreview from "./file-upload-preview";
 import PhotoVideoUploadPreview from "./photo-video-upload-preview";
+import AudioUploadPreview from "./audio-upload-preview";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import { ContactSelectModal } from "./contact-select-modal";
 import { Contact } from "@/types";
 import { toast } from "sonner";
 import { useMediaUpload } from "@/hooks/use-media-upload";
+import { MediaViewerProvider } from "@/components/chat/MediaViewerContext";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -55,21 +57,22 @@ const VoiceWaveform = ({ small }: { small?: boolean }) => {
     );
 };
 
-const DateSeparator = ({ label }: { label: string }) => (
-    <div className="flex justify-center my-3">
+const DateSeparator = React.memo(({ label }: { label: string }) => (
+    <div className="flex justify-center my-3 text-center">
         <span className="bg-white text-[#54656f] text-[12.5px] px-3 py-1.5 rounded-lg shadow-sm">
             {label}
         </span>
     </div>
-);
+));
+DateSeparator.displayName = "DateSeparator";
 
-const UnreadBanner = React.forwardRef<HTMLDivElement, { count: number }>(({ count }, ref) => (
+const UnreadBanner = React.memo(React.forwardRef<HTMLDivElement, { count: number }>(({ count }, ref) => (
     <div ref={ref} className="flex justify-center my-3 bg-background-secondary py-1.5">
         <span className="bg-background text-[12.5px] px-3 py-1.5 rounded-full shadow-sm">
             {count} unread {count === 1 ? 'message' : 'messages'}
         </span>
     </div>
-));
+)));
 UnreadBanner.displayName = "UnreadBanner";
 
 
@@ -145,9 +148,10 @@ const groupMediaMessages = (messages: any[]) => {
 const ChatSection = ({ chatId }: { chatId: string }) => {
     const directMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.direct_message?.id === chatId).first(), [chatId])
     const groupMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.group_chat?.id === chatId).first(), [chatId])
-    const currentUser = useLiveQuery(
+    const _currentUser = useLiveQuery(
         async () => await db.user.toCollection().first()
     );
+    const currentUser = React.useMemo(() => _currentUser, [_currentUser?.id, _currentUser?.display_name, _currentUser?.phone]);
     const directMessageChats = useLiveQuery(
         () => db.directmessagechats.where('direct_message_id').equals(chatId).sortBy('timestamp'),
         [chatId]
@@ -173,10 +177,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Media (Photos & Videos) state
     const [pendingMedia, setPendingMedia] = React.useState<File[]>([]);
     const [isMediaPreviewOpen, setIsMediaPreviewOpen] = React.useState(false);
+    const [pendingAudio, setPendingAudio] = React.useState<File[]>([]);
+    const [isAudioPreviewOpen, setIsAudioPreviewOpen] = React.useState(false);
     const [isContactModalOpen, setIsContactModalOpen] = React.useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaInputRef = useRef<HTMLInputElement>(null);
+    const audioInputRef = useRef<HTMLInputElement>(null);
 
     // ── Draft ─────────────────────────────────────────────────────────
     // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
@@ -265,6 +272,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         return groupMediaMessages(combined);
     }, [groupMessageChats, localOptimisticMessages, chatId, chatType]);
+
+    const allVisualMedia = useMemo(() => {
+        const messages = chatType === "groupchat" ? processedGroupMessages : processedDirectMessages;
+        return messages
+            .flatMap(m => m.files || [])
+            .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio');
+    }, [processedDirectMessages, processedGroupMessages, chatType]);
 
     // ── Scroll Manager Hook ──────────────────────────────────────────
     const messagesLength = chatType === "groupchat"
@@ -575,19 +589,31 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         e.target.value = "";
     };
 
-    const handleSendFiles = (files: File[], captions: Record<number, string>) => {
+    const handleAudioSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length > 0) {
+            setPendingAudio(prev => [...prev, ...selectedFiles]);
+            setIsAudioPreviewOpen(true);
+        }
+        e.target.value = "";
+    };
+
+    const handleSendFiles = (files: File[], captions: Record<number, string>, isDocument?: boolean) => {
         if (!currentUser) return;
 
         // Clear UI immediately for instant feedback
         setPendingFiles([]);
         setPendingMedia([]);
+        setPendingAudio([]);
         setIsPreviewOpen(false);
         setIsMediaPreviewOpen(false);
+        setIsAudioPreviewOpen(false);
 
         // Run upload in background
         uploadMediaFiles(files, {
             chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
-            context_id: chatId
+            context_id: chatId,
+            forceDocument: isDocument
         }, captions).then(() => {
             scrollToBottom();
         }).catch((error) => {
@@ -611,6 +637,16 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             const next = prev.filter((_, i) => i !== index);
             if (next.length === 0) {
                 setIsMediaPreviewOpen(false);
+            }
+            return next;
+        });
+    };
+
+    const handleRemoveAudioFile = (index: number) => {
+        setPendingAudio(prev => {
+            const next = prev.filter((_, i) => i !== index);
+            if (next.length === 0) {
+                setIsAudioPreviewOpen(false);
             }
             return next;
         });
@@ -772,8 +808,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
 
     return (
-        <SidebarInset>
-            <div className="flex bg-[#efeae2] h-screen overflow-hidden">
+        <MediaViewerProvider>
+            <SidebarInset>
+                <div className="flex bg-[#efeae2] h-screen overflow-hidden">
                 {/* ── Main Chat Section ───────────────────────────── */}
                 <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
                     {/* ── Header ─────────────────────────────────────────── */}
@@ -823,7 +860,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     if (showSeparator) lastDateLabel = dateLabel;
                                     const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                     return (
-                                        <React.Fragment key={msg.id || msg.client_msg_id}>
+                                        <React.Fragment key={msg.client_msg_id || msg.id}>
                                             {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                             {showSeparator && <DateSeparator label={dateLabel} />}
                                             <MessageBubble
@@ -832,6 +869,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 isDM={true}
                                                 isConsecutive={isConsecutive}
                                                 onShowInfo={setMessageInfoMsg}
+                                                allVisualMedia={allVisualMedia}
                                             />
                                         </React.Fragment>
                                     );
@@ -862,6 +900,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 isDM={false}
                                                 isConsecutive={isConsecutive}
                                                 onShowInfo={setMessageInfoMsg}
+                                                allVisualMedia={allVisualMedia}
                                             />
                                         </React.Fragment>
                                     );
@@ -939,7 +978,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                         <span className="text-[14.5px] font-normal">Camera</span>
                                     </DropdownMenuItem>
 
-                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                    <DropdownMenuItem
+                                        onClick={() => audioInputRef.current?.click()}
+                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                    >
                                         <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
                                             <Headphones size={20} className="text-[#ff7f35]" />
                                         </div>
@@ -1044,6 +1086,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             multiple
                             onChange={handleMediaSelect}
                         />
+                        <input
+                            type="file"
+                            ref={audioInputRef}
+                            className="hidden"
+                            accept="audio/*"
+                            multiple
+                            onChange={handleAudioSelect}
+                        />
 
                         {/* File Upload Preview Overlay (covers messages + footer only) */}
                         {isPreviewOpen && (
@@ -1074,6 +1124,22 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     mediaInputRef.current?.click();
                                 }}
                                 onRemoveFile={handleRemoveMediaFile}
+                            />
+                        )}
+
+                        {/* Audio Editor Preview */}
+                        {isAudioPreviewOpen && (
+                            <AudioUploadPreview
+                                files={pendingAudio}
+                                onClose={() => {
+                                    setIsAudioPreviewOpen(false);
+                                    setPendingAudio([]);
+                                }}
+                                onSend={handleSendFiles}
+                                onAddMore={() => {
+                                    audioInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveAudioFile}
                             />
                         )}
 
@@ -1211,9 +1277,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     />
                 ) : null}
             </div>
-
-
         </SidebarInset>
+        </MediaViewerProvider>
     );
 };
 

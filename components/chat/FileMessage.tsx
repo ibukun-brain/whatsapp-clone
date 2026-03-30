@@ -1,14 +1,13 @@
 import React, { memo } from 'react'
-import { FileText, FileArchive, FileBarChart2 as FileSpreadsheet, BarChart2 as FileBarChart, File as FileIcon, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
+import { FileText, FileArchive, FileBarChart2 as FileSpreadsheet, BarChart2 as FileBarChart, File as FileIcon, Download, Loader2, AlertCircle } from 'lucide-react'
 import { MediaFile } from '@/types/mediaTypes'
 
 interface FileMessageProps {
   file: MediaFile
   onRetry?: () => void
-  timestamp?: string
 }
 
-function getFileIcon(type: MediaFile['type'], mimeType: string) {
+function getFileIcon(type: MediaFile['type']) {
   switch (type) {
     case 'pdf':         return <FileText className="h-8 w-8 text-red-500" />
     case 'word':        return <FileText className="h-8 w-8 text-blue-500" />
@@ -23,15 +22,16 @@ function getFileIcon(type: MediaFile['type'], mimeType: string) {
 }
 
 function getFormatLabel(type: MediaFile['type'], mimeType: string) {
+  const safeMime = mimeType ?? ''
   switch (type) {
     case 'pdf':         return 'PDF'
-    case 'word':        return mimeType.includes('.document') ? 'DOCX' : 'DOC'
-    case 'excel':       return mimeType.includes('.sheet') ? 'XLSX' : 'XLS'
-    case 'powerpoint':  return mimeType.includes('.presentation') ? 'PPTX' : 'PPT'
+    case 'word':        return safeMime.includes('.document') ? 'DOCX' : 'DOC'
+    case 'excel':       return safeMime.includes('.sheet') ? 'XLSX' : 'XLS'
+    case 'powerpoint':  return safeMime.includes('.presentation') ? 'PPTX' : 'PPT'
     case 'access':      return 'MDB'
-    case 'archive':     return mimeType.includes('rar') ? 'RAR' : mimeType.includes('7z') ? '7Z' : 'ZIP'
-    case 'audio':       return (mimeType ?? '').split('/')[1]?.toUpperCase() || 'AUDIO'
-    default:            return (mimeType ?? '').split('/')[1]?.toUpperCase() || 'FILE'
+    case 'archive':     return safeMime.includes('rar') ? 'RAR' : safeMime.includes('7z') ? '7Z' : 'ZIP'
+    case 'audio':       return safeMime.split('/')[1]?.toUpperCase() || 'AUDIO'
+    default:            return safeMime.split('/')[1]?.toUpperCase() || 'FILE'
   }
 }
 
@@ -43,13 +43,13 @@ function formatFileSize(bytes: number) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-function FileMessageComp({ file, onRetry, timestamp }: FileMessageProps) {
+function FileMessageComp({ file, onRetry }: FileMessageProps) {
   const isReady = file.status === 'ready'
 
   return (
     <div className="flex w-full min-w-[200px] max-w-[280px] items-start gap-3 rounded-lg bg-black/5 p-3 dark:bg-white/5">
       <div className="relative shrink-0">
-        {getFileIcon(file.type, file.mime_type)}
+        {getFileIcon(file.type)}
         {(file.status === 'uploading' || file.status === 'processing') && (
           <div className="absolute -bottom-1 -right-1 rounded-full bg-white p-0.5 shadow-sm dark:bg-gray-800">
             <Loader2 className="h-3 w-3 animate-spin text-green-500" />
@@ -65,12 +65,6 @@ function FileMessageComp({ file, onRetry, timestamp }: FileMessageProps) {
           <span>{getFormatLabel(file.type, file.mime_type)}</span>
           <span>•</span>
           <span>{formatFileSize(file.file_size)}</span>
-          {timestamp && (
-            <>
-              <span>•</span>
-              <span className="uppercase">{timestamp}</span>
-            </>
-          )}
         </div>
         
         {file.status === 'uploading' && (
@@ -119,6 +113,6 @@ export default memo(FileMessageComp, (prev, next) => {
     prev.file.status === next.file.status &&
     prev.file.progress === next.file.progress &&
     prev.file.media_url === next.file.media_url &&
-    prev.timestamp === next.timestamp
+    (prev.file.timestamp ? new Date(prev.file.timestamp).getTime() : 0) === (next.file.timestamp ? new Date(next.file.timestamp).getTime() : 0)
   )
 })

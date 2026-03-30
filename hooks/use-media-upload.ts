@@ -5,6 +5,7 @@ import { computeBlurhash } from '@/lib/utils/computeBlurhash'
 import { axiosInstance } from '@/lib/axios'
 import { uploadMedia } from '@/lib/utils/mediaUploader'
 import { getValidFilename } from '@/lib/utils'
+import { getVideoMetadata } from '@/lib/utils/media-utils'
 import { UploadContext, MediaFile, MediaReadyEvent } from '@/types/mediaTypes'
 
 import { DirectMessageChats, GroupMessageChats } from '@/types'
@@ -41,10 +42,12 @@ const ARCHIVE_MIMES = new Set([
   'application/x-xz',
 ])
 
-export function getMediaType(mimeType: string): MediaFile['type'] {
-  if (mimeType.startsWith('image/')) return 'image'
-  if (mimeType.startsWith('video/')) return 'video'
-  if (mimeType.startsWith('audio/')) return 'audio'
+export function getMediaType(mimeType: string, forceDocument?: boolean): MediaFile['type'] {
+  if (!forceDocument) {
+    if (mimeType.startsWith('image/')) return 'image'
+    if (mimeType.startsWith('video/')) return 'video'
+    if (mimeType.startsWith('audio/')) return 'audio'
+  }
   if (mimeType === 'application/pdf') return 'pdf'
   if (WORD_MIMES.has(mimeType)) return 'word'
   if (EXCEL_MIMES.has(mimeType)) return 'excel'
@@ -120,8 +123,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
 
     const updatedFiles = message.files.map((f: MediaFile) => {
       // Find specific file primarily by client_file_id, fallback to filename and size
-      const isMatch = (data.files.client_file_id && f.client_file_id === data.files.client_file_id) || 
-                      (f.filename === fileData.filename && f.file_size === fileData.file_size);
+      const isMatch = (data.files.client_file_id && f.client_file_id === data.files.client_file_id) ||
+        (f.filename === fileData.filename && f.file_size === fileData.file_size);
       if (isMatch) {
         return {
           ...f,
@@ -183,11 +186,24 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       const { blurhash, aspect_ratio, preview_url } = await computeBlurhash(file)
       const tempFileId = `${Date.now()}-${index}`
       const clientFileId = `cfile-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`
-      const mediaType: MediaFile['type'] = getMediaType(file.type)
+      let mediaType: MediaFile['type'] = getMediaType(file.type, context.forceDocument)
 
+      let tempFilesMimeType = file.type;
       let duration: number | undefined
       if (mediaType === 'audio' || mediaType === 'video') {
-        duration = await getAudioDuration(file)
+         // Special handling for .mpeg or generic video mime types that might be audio
+         if (mediaType === 'video') {
+            const meta = await getVideoMetadata(file)
+            if (meta.width === 0 && meta.height === 0) {
+               console.log('Video mime type has no dimensions - treating as audio.')
+               mediaType = 'audio'
+               // Use a corrected mime type for the database and uploader metadata
+               tempFilesMimeType = 'audio/mpeg'
+            }
+            duration = meta.duration
+         } else {
+            duration = await getAudioDuration(file)
+         }
       }
 
       return {
@@ -204,7 +220,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           blurhash,
           aspect_ratio,
           filename: getValidFilename(file.name),
-          mime_type: file.type,
+          mime_type: tempFilesMimeType,
           file_size: file.size,
           duration,
           caption: captions?.[index] || context.caption,
@@ -265,6 +281,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       try {
         await uploadMedia({
           file: originalFile,
+          mimeType: mediaFile.mime_type,
+          mediaType: mediaFile.type,
           context: { ...context, caption: mediaFile.caption, client_msg_id: clientMsgId, client_file_id: mediaFile.client_file_id },
           blurhash: mediaFile.blurhash,
           aspect_ratio: mediaFile.aspect_ratio,
@@ -414,6 +432,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       await uploadMedia({
         file: blobToUpload,
         name: getValidFilename(file.filename),
+        mimeType: file.mime_type,
+        mediaType: file.type,
         context,
         blurhash: file.blurhash,
         aspect_ratio: file.aspect_ratio,

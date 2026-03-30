@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, memo } from 'react'
-import { Play, Pause, Loader2, AlertCircle } from 'lucide-react'
+import { Play, Pause, Loader2, AlertCircle, Headphones } from 'lucide-react'
 import { MediaFile } from '@/types/mediaTypes'
 import { cn } from '@/lib/utils'
 
@@ -7,6 +7,8 @@ interface AudioMessageProps {
   file: MediaFile
   onRetry?: () => void
   timestamp?: string
+  isMine?: boolean
+  receipt?: React.ReactNode
 }
 
 function formatDuration(seconds: number = 0) {
@@ -15,7 +17,7 @@ function formatDuration(seconds: number = 0) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function AudioMessageComp({ file, onRetry, timestamp }: AudioMessageProps) {
+function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMessageProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(file.duration || 0)
@@ -52,7 +54,7 @@ function AudioMessageComp({ file, onRetry, timestamp }: AudioMessageProps) {
         audio.pause()
       }
     }
-  }, [audioUrl, file.file_id])
+  }, [audioUrl, file.file_id, file.duration])
 
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -79,86 +81,89 @@ function AudioMessageComp({ file, onRetry, timestamp }: AudioMessageProps) {
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
-    <div className="flex min-w-[240px] max-w-[300px] items-center gap-3 rounded-lg bg-black/5 p-3 dark:bg-white/5">
-      <div className="relative shrink-0">
-        {isUploading ? (
-           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/20 text-green-500">
-             <Loader2 className="h-5 w-5 animate-spin" />
-           </div>
-        ) : isFailed ? (
-          <button 
-             onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
-             className="flex h-10 w-10 items-center justify-center rounded-full bg-red-50 text-red-500 dark:bg-red-500/20"
-          >
-            <AlertCircle className="h-5 w-5" />
-          </button>
-        ) : (
+    <div className={cn(
+      "flex min-w-[280px] max-w-[320px] items-start gap-2.5 py-1 px-1",
+      isMine ? "" : "" // We let MessageBubble handle the main background usually
+    )}>
+      {/* 1. Large Orange Icon with Headphones */}
+      <div className="relative shrink-0 mt-0.5">
+        <div className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#ffb02e] text-white">
+          <Headphones className="h-7 w-7" strokeWidth={2.5} />
+          {/* Status overlays if any */}
+          {isUploading && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/20">
+              <Loader2 className="h-6 w-6 animate-spin text-white" />
+            </div>
+          )}
+          {isFailed && (
+            <button 
+               onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
+               className="absolute inset-0 flex items-center justify-center rounded-full bg-black/20 text-white"
+            >
+              <AlertCircle className="h-6 w-6" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col pt-1">
+        <div className="flex items-center gap-3">
+          {/* 2. Play/Pause Button */}
           <button 
              disabled={!isReady}
              onClick={togglePlay}
              className={cn(
-               "flex h-10 w-10 items-center justify-center rounded-full transition-colors",
-               isReady 
-                 ? "bg-green-500 text-white hover:bg-green-600" 
-                 : "bg-gray-300 text-gray-500 dark:bg-gray-700"
+               "flex h-8 w-8 shrink-0 items-center justify-center transition-colors",
+               isReady ? "text-[#54656f]" : "text-gray-400"
              )}
           >
             {isPlaying ? (
-               <Pause className="h-5 w-5 fill-current ml-0" />
+               <Pause className="h-6 w-6 fill-current" />
             ) : (
-               <Play className="h-5 w-5 fill-current ml-1" />
+               <Play className="h-6 w-6 fill-current" />
             )}
           </button>
-        )}
-      </div>
 
-      <div className="flex flex-1 flex-col justify-center overflow-hidden">
-        <div className="relative mb-1 flex h-6 items-center">
-            {isUploading ? (
-               <div className="h-1 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                 <div 
-                   className="h-full bg-green-500 transition-all duration-300" 
-                   style={{ width: `${file.progress}%` }}
-                 />
-               </div>
-            ) : (
-                <div className="relative flex w-full items-center">
-                  <div className="absolute h-1 w-full rounded-full bg-gray-300 dark:bg-gray-600" />
-                  <div 
-                     className="absolute h-1 rounded-full bg-green-500" 
-                     style={{ width: `${progressPercent}%` }}
-                  />
-                  <input
-                     type="range"
-                     min="0"
-                     max={duration || 100}
-                     value={currentTime}
-                     onChange={handleSeek}
-                     disabled={!isReady}
-                     className="absolute w-full cursor-pointer opacity-0 z-10"
-                     onClick={(e) => e.stopPropagation()}
-                  />
-                  <div 
-                     className="absolute h-3 w-3 -ml-1.5 rounded-full bg-green-500 shadow pointer-events-none transition-all"
-                     style={{ left: `${progressPercent}%` }}
-                  />
+          {/* 3. Seeker Column */}
+          <div className="flex flex-1 flex-col gap-1.5 min-w-0 pr-2">
+            <div className="relative h-6 flex items-center">
+                <div className="relative w-full h-1 bg-[#b0bcc3] rounded-full overflow-hidden">
+                   <div 
+                      className="absolute h-full bg-[#33b1ff]" 
+                      style={{ width: `${progressPercent}%` }}
+                   />
                 </div>
-            )}
+                <input
+                   type="range"
+                   min="0"
+                   max={duration || 100}
+                   step="0.1"
+                   value={currentTime}
+                   onChange={handleSeek}
+                   disabled={!isReady}
+                   className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+                   onClick={(e) => e.stopPropagation()}
+                />
+                {/* Custom Thumb */}
+                <div 
+                   className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-[#33b1ff] shadow-sm pointer-events-none z-0"
+                   style={{ left: `${progressPercent}%` }}
+                />
+            </div>
+          </div>
         </div>
-        
-        <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-           {isUploading ? (
-             <span>{file.progress}% Uploading</span>
-           ) : isFailed ? (
-             <span className="text-red-500">Failed to upload</span>
-           ) : (
-             <>
-               <span className="tabular-nums w-[35px]">
-                 {isPlaying ? formatDuration(currentTime) : formatDuration(duration)}
-               </span>
-               {(file.mime_type ?? '').split('/')[1]?.toUpperCase() || 'AUDIO'} • {((file.file_size || 0) / 1024 / 1024).toFixed(1)}MB
-               {timestamp && <span className="ml-auto inline-flex items-center gap-1.5">{timestamp}</span>}
-             </>
+
+        {/* 4. Metadata Line (Timer & Timestamp) */}
+        <div className="flex items-center justify-between text-[11.5px] text-[#667781] mt-0.5 px-0.5">
+           <span className="tabular-nums">
+             {isPlaying || currentTime > 0 ? formatDuration(currentTime) : formatDuration(duration)}
+           </span>
+           
+           {(timestamp || receipt) && (
+             <div className="flex items-center gap-1">
+               {timestamp && <span>{timestamp}</span>}
+               {receipt}
+             </div>
            )}
         </div>
       </div>
@@ -172,6 +177,8 @@ export default memo(AudioMessageComp, (prev, next) => {
     prev.file.status === next.file.status &&
     prev.file.progress === next.file.progress &&
     prev.file.media_url === next.file.media_url &&
-    prev.timestamp === next.timestamp
+    prev.timestamp === next.timestamp &&
+    prev.isMine === next.isMine &&
+    prev.receipt === next.receipt
   )
 })

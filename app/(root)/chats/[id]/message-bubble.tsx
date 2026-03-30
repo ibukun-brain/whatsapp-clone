@@ -77,14 +77,16 @@ const MessageBubble = ({
     isDM,
     isConsecutive = false,
     onShowInfo,
-    onRetryMessage
+    onRetryMessage,
+    allVisualMedia = []
 }: {
     msg: DirectMessageChats | GroupMessageChats,
     currentUser: User,
     isDM: boolean,
     isConsecutive?: boolean,
     onShowInfo?: (msg: GroupMessageChats) => void,
-    onRetryMessage?: (msg: DirectMessageChats | GroupMessageChats) => void
+    onRetryMessage?: (msg: DirectMessageChats | GroupMessageChats) => void,
+    allVisualMedia?: MediaFile[]
 }) => {
     const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
     const displayTimestamp = (msg.files && msg.files.length > 0) ? msg.files[0].timestamp : msg.timestamp;
@@ -209,7 +211,7 @@ const MessageBubble = ({
 
     const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
     const { cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
-    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video');
+    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video' || f.type === 'audio');
 
     const messageStatusKey = `${msg.isOptimistic}-${msg.content ? 'hasContent' : 'noContent'}-${isDM
         ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))
@@ -238,6 +240,7 @@ const MessageBubble = ({
                                             userTimezone={currentUser.timezone}
                                             receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
                                             messageStatus={messageStatusKey}
+                                            allVisualMedia={allVisualMedia}
                                         />
                                     </div>
                                 )}
@@ -303,6 +306,7 @@ const MessageBubble = ({
                                             userTimezone={currentUser.timezone}
                                             receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
                                             messageStatus={messageStatusKey}
+                                            allVisualMedia={allVisualMedia}
                                         />
 
 
@@ -316,7 +320,7 @@ const MessageBubble = ({
                                 )}
 
                                 {(!hasVisuals || msg.content) && (
-                                    <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5 h-4">
+                                    <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5 pb-1.5">
                                         {(msg as any).receipt === 'failed' && (
                                             <button
                                                 onClick={() => onRetryMessage?.(msg)}

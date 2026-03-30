@@ -1,9 +1,12 @@
-import React, { memo } from 'react'
+import React, { memo, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { MediaFile } from '@/types/mediaTypes'
 import ImageMessage from './ImageMessage'
 import VideoMessage from './VideoMessage'
 import FileMessage from './FileMessage'
 import AudioMessage from './AudioMessage'
+import MediaViewer from './MediaViewer'
+import { useMediaViewer } from './MediaViewerContext'
 import { cn, getDateTimeByTimezone } from '@/lib/utils'
 
 interface MediaGridProps {
@@ -14,9 +17,25 @@ interface MediaGridProps {
   userTimezone: string
   receipt?: React.ReactNode
   messageStatus?: string
+  allVisualMedia?: MediaFile[]
 }
 
-function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt }: MediaGridProps) {
+function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [] }: MediaGridProps) {
+  const { openViewer } = useMediaViewer()
+
+  // Collect all viewable files (image, video, audio) for the local grid
+  const viewableFiles = files.filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio')
+
+  const openViewerHandler = useCallback((file: MediaFile) => {
+    // We want to open the viewer using the CHAT-WIDE visual media array
+    const mediaToUse = allVisualMedia.length > 0 ? allVisualMedia : viewableFiles
+    const idx = mediaToUse.findIndex(f => f.file_id === file.file_id)
+
+    if (idx >= 0 && (file.media_url || file.preview_url)) {
+      openViewer(mediaToUse, idx)
+    }
+  }, [viewableFiles, allVisualMedia, openViewer])
+
   if (!files || files.length === 0) return null
 
   const visuals = files.filter(f => f.type === 'image' || f.type === 'video')
@@ -52,7 +71,11 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
     const className = size === 'full' ? 'w-full h-full' : 'w-[138px] h-[138px]'
 
     return (
-      <div key={file.file_id} className={cn("relative overflow-hidden rounded", className)}>
+      <div
+        key={file.file_id}
+        className={cn("relative overflow-hidden rounded cursor-pointer", className)}
+        onClick={(e) => { e.stopPropagation(); openViewerHandler(file) }}
+      >
         <Component
           file={file}
           isMine={isMine}
@@ -130,7 +153,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
               {/* Only show timestamp/receipt in footer if it's NOT shown on individual items.
                   This happens if it's an odd count of exactly 3 or if there's a caption. */}
               {(hasCaption || (visuals.length > 1 && visuals.length % 2 !== 0 && visuals.length <= 3)) && (
-                <div className="flex items-center justify-end gap-0.5 -mr-2">
+                <div className="flex items-center justify-end gap-0.5 -mr-1">
                   <span className="text-[11px] text-[#667781] font-medium">
                     {firstVisualTime}
                   </span>
@@ -148,9 +171,11 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
           {attachments.map(file => {
             const { time: fileTime } = getDateTimeByTimezone(file.timestamp, userTimezone)
             return file.type === 'audio' ? (
-              <AudioMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} />
+              <div key={file.file_id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); openViewerHandler(file) }}>
+                <AudioMessage file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
+              </div>
             ) : (
-              <FileMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} />
+              <FileMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} />
             )
           })}
         </div>

@@ -32,7 +32,7 @@ function truncateFileName(name: string, maxLen = 28): string {
     return `${base}...${ext}`;
 }
 
-const PdfAttachmentPreview = ({ attachment }: PdfAttachmentPreviewProps) => {
+const PdfAttachmentPreview = React.memo(({ attachment }: PdfAttachmentPreviewProps) => {
     const hasThumbnail = !!attachment.thumbnail_url;
 
     return (
@@ -89,6 +89,7 @@ const PdfAttachmentPreview = ({ attachment }: PdfAttachmentPreviewProps) => {
             </div>
         </div>
     );
-};
+});
+PdfAttachmentPreview.displayName = "PdfAttachmentPreview";
 
 export default PdfAttachmentPreview;

@@ -31,7 +31,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
   const aspectRatio = file.aspect_ratio || 1.77
   const maxWidth = 320
   const minWidth = 150
-  
+
   const width = Math.max(minWidth, Math.min(maxWidth, 280))
   const height = width / aspectRatio
 
@@ -44,7 +44,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
   }
 
   return (
-    <div 
+    <div
       className="relative overflow-hidden bg-black/10 group/video"
       style={fill ? { width: '100%', height: '100%' } : { width: `${width}px`, height: `${height}px` }}
     >
@@ -63,17 +63,17 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
       )}
 
       {isReady ? (
-        <video 
-          src={file.media_url || blobUrl || ''} 
-          controls 
+        <video
+          src={file.media_url || blobUrl || ''}
+          controls
           className="h-full w-full object-cover relative z-10"
           poster={file.thumbnail_url || undefined}
         />
       ) : (
         <div className="relative h-full w-full">
           {videoSrc && file.status !== 'failed' && (
-            <video 
-              src={videoSrc} 
+            <video
+              src={videoSrc}
               className="h-full w-full object-cover opacity-80"
               muted
               playsInline
@@ -90,7 +90,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
             <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
               <div className="relative flex items-center justify-center w-12 h-12">
                 <Loader2 className="absolute inset-0 h-full w-full animate-spin text-white opacity-60 font-bold" strokeWidth={3} />
-                <button 
+                <button
                   onClick={(e) => {
                     e.stopPropagation()
                     onCancel?.()
@@ -106,8 +106,8 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
 
           {file.status === 'uploading' && (
             <div className="absolute bottom-0 left-0 h-1 bg-white/30 w-full z-20">
-              <div 
-                className="h-full bg-green-500 transition-all duration-300" 
+              <div
+                className="h-full bg-green-500 transition-all duration-300"
                 style={{ width: `${file.progress}%` }}
               />
             </div>
@@ -118,7 +118,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
       {/* Failed / Not Downloaded State (The Pill) */}
       {(file.status === 'failed' || (!isReady && !blobUrl && !file.preview_url)) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/10 backdrop-blur-[1px]">
-          <button 
+          <button
             onClick={(e) => {
               e.stopPropagation()
               onRetry?.()
@@ -142,7 +142,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
 
       {(timestamp || receipt) && (
         <div className={cn(
-          "absolute bottom-1 right-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-20",
+          "absolute bottom-1 right-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-20",
           !isReady ? "bg-black/30 backdrop-blur-sm" : "bg-black/10"
         )}>
           <span>{timestamp}</span>
