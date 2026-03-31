@@ -34,6 +34,22 @@ export interface MediaViewerProps {
   onClose: () => void
 }
 
+function useFileUrl(file: MediaFile | undefined) {
+  const [localUrl, setLocalUrl] = useState<string | null>(null)
+  
+  useEffect(() => {
+    if (file?.file_blob && !file.media_url && !file.preview_url) {
+      const url = URL.createObjectURL(file.file_blob as Blob)
+      setLocalUrl(url)
+      return () => URL.revokeObjectURL(url)
+    }
+    setLocalUrl(null)
+  }, [file])
+
+  if (!file) return ''
+  return file.media_url || file.preview_url || localUrl || ''
+}
+
 // ─── Audio Player (inline) ────────────────────────────────────────────
 function ViewerAudioPlayer({ file }: { file: MediaFile }) {
   const [isPlaying, setIsPlaying] = useState(false)
@@ -41,7 +57,7 @@ function ViewerAudioPlayer({ file }: { file: MediaFile }) {
   const [duration, setDuration] = useState(file.duration || 0)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const audioUrl = file.media_url || file.preview_url
+  const audioUrl = useFileUrl(file)
 
   useEffect(() => {
     if (!audioUrl) return
@@ -161,6 +177,7 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose 
   const isImage = activeFile?.type === 'image'
   const isVideo = activeFile?.type === 'video'
   const isAudio = activeFile?.type === 'audio'
+  const activeFileUrl = useFileUrl(activeFile)
 
   // Reset zoom/pan on slide change
   useEffect(() => {
@@ -388,7 +405,7 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose 
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={activeFile.media_url || activeFile.preview_url || ''}
+                src={activeFileUrl}
                 alt={activeFile.filename}
                 className="max-h-[calc(100vh-180px)] max-w-[calc(100vw-120px)] object-contain select-none pointer-events-none"
                 draggable={false}
@@ -399,7 +416,7 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose 
           {isVideo && (
             <video
               key={activeFile.file_id}
-              src={activeFile.media_url || activeFile.preview_url || ''}
+              src={activeFileUrl}
               controls
               autoPlay
               className="max-h-[calc(100vh-180px)] max-w-[calc(100vw-120px)] object-contain rounded-lg"

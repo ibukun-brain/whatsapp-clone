@@ -186,7 +186,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       const { blurhash, aspect_ratio, preview_url } = await computeBlurhash(file)
       const tempFileId = `${Date.now()}-${index}`
       const clientFileId = `cfile-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`
-      let mediaType: MediaFile['type'] = getMediaType(file.type, context.forceDocument)
+      let mediaType: MediaFile['type'] = context.mediaTypeOverride as MediaFile['type'] || getMediaType(file.type, context.forceDocument)
 
       let tempFilesMimeType = file.type;
       let duration: number | undefined
@@ -222,7 +222,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           filename: getValidFilename(file.name),
           mime_type: tempFilesMimeType,
           file_size: file.size,
-          duration,
+          duration: context.duration ?? duration,
           caption: captions?.[index] || context.caption,
           file_blob: file, // Store for retry
           timestamp,

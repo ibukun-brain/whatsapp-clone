@@ -22,7 +22,7 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(file.duration || 0)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  
+
   const isReady = file.status === 'ready'
   const isUploading = file.status === 'uploading' || file.status === 'processing'
   const isFailed = file.status === 'failed'
@@ -33,7 +33,7 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
     if (audioUrl) {
       const audio = new Audio(audioUrl)
       audioRef.current = audio
-      
+
       const handleLoadedMetadata = () => {
         if (!file.duration) setDuration(audio.duration)
       }
@@ -59,7 +59,7 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!audioRef.current || !isReady) return
-    
+
     if (isPlaying) {
       audioRef.current.pause()
       setIsPlaying(false)
@@ -72,7 +72,7 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
     if (!audioRef.current || !isReady) return
-    
+
     const time = Number(e.target.value)
     audioRef.current.currentTime = time
     setCurrentTime(time)
@@ -96,9 +96,9 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
             </div>
           )}
           {isFailed && (
-            <button 
-               onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
-               className="absolute inset-0 flex items-center justify-center rounded-full bg-black/20 text-white"
+            <button
+              onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
+              className="absolute inset-0 flex items-center justify-center rounded-full bg-black/20 text-white"
             >
               <AlertCircle className="h-6 w-6" />
             </button>
@@ -109,62 +109,62 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
       <div className="flex flex-1 flex-col pt-1">
         <div className="flex items-center gap-3">
           {/* 2. Play/Pause Button */}
-          <button 
-             disabled={!isReady}
-             onClick={togglePlay}
-             className={cn(
-               "flex h-8 w-8 shrink-0 items-center justify-center transition-colors",
-               isReady ? "text-[#54656f]" : "text-gray-400"
-             )}
+          <button
+            disabled={!isReady}
+            onClick={togglePlay}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center transition-colors",
+              isReady ? "text-[#54656f]" : "text-gray-400"
+            )}
           >
             {isPlaying ? (
-               <Pause className="h-6 w-6 fill-current" />
+              <Pause className="h-6 w-6 fill-current" />
             ) : (
-               <Play className="h-6 w-6 fill-current" />
+              <Play className="h-6 w-6 fill-current" />
             )}
           </button>
 
           {/* 3. Seeker Column */}
           <div className="flex flex-1 flex-col gap-1.5 min-w-0 pr-2">
             <div className="relative h-6 flex items-center">
-                <div className="relative w-full h-1 bg-[#b0bcc3] rounded-full overflow-hidden">
-                   <div 
-                      className="absolute h-full bg-[#33b1ff]" 
-                      style={{ width: `${progressPercent}%` }}
-                   />
-                </div>
-                <input
-                   type="range"
-                   min="0"
-                   max={duration || 100}
-                   step="0.1"
-                   value={currentTime}
-                   onChange={handleSeek}
-                   disabled={!isReady}
-                   className="absolute w-full h-full opacity-0 cursor-pointer z-10"
-                   onClick={(e) => e.stopPropagation()}
+              <div className="relative w-full h-1 bg-[#b0bcc3] rounded-full overflow-hidden">
+                <div
+                  className="absolute h-full bg-[#33b1ff]"
+                  style={{ width: `${progressPercent}%` }}
                 />
-                {/* Custom Thumb */}
-                <div 
-                   className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-[#33b1ff] shadow-sm pointer-events-none z-0"
-                   style={{ left: `${progressPercent}%` }}
-                />
+              </div>
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                step="0.1"
+                value={currentTime}
+                onChange={handleSeek}
+                disabled={!isReady}
+                className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {/* Custom Thumb */}
+              <div
+                className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-[#33b1ff] shadow-sm pointer-events-none z-0"
+                style={{ left: `${progressPercent}%` }}
+              />
             </div>
           </div>
         </div>
 
         {/* 4. Metadata Line (Timer & Timestamp) */}
         <div className="flex items-center justify-between text-[11.5px] text-[#667781] mt-0.5 px-0.5">
-           <span className="tabular-nums">
-             {isPlaying || currentTime > 0 ? formatDuration(currentTime) : formatDuration(duration)}
-           </span>
-           
-           {(timestamp || receipt) && (
-             <div className="flex items-center gap-1">
-               {timestamp && <span>{timestamp}</span>}
-               {receipt}
-             </div>
-           )}
+          <span className="tabular-nums">
+            {isPlaying || currentTime > 0 ? formatDuration(currentTime) : formatDuration(duration)}
+          </span>
+
+          {(timestamp || receipt) && (
+            <div className="flex items-center gap-1">
+              {timestamp && <span>{timestamp}</span>}
+              {receipt}
+            </div>
+          )}
         </div>
       </div>
     </div>

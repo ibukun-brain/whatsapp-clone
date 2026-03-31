@@ -9,13 +9,13 @@ interface FileMessageProps {
 
 function getFileIcon(type: MediaFile['type']) {
   switch (type) {
-    case 'pdf':         return <FileText className="h-8 w-8 text-red-500" />
-    case 'word':        return <FileText className="h-8 w-8 text-blue-500" />
-    case 'excel':       return <FileSpreadsheet className="h-8 w-8 text-green-500" />
-    case 'powerpoint':  return <FileBarChart className="h-8 w-8 text-orange-500" />
-    case 'access':      return <FileIcon className="h-8 w-8 text-red-700" />
-    case 'archive':     return <FileArchive className="h-8 w-8 text-orange-500" />
-    case 'audio':       return <FileIcon className="h-8 w-8 text-purple-500" />
+    case 'pdf': return <FileText className="h-8 w-8 text-red-500" />
+    case 'word': return <FileText className="h-8 w-8 text-blue-500" />
+    case 'excel': return <FileSpreadsheet className="h-8 w-8 text-green-500" />
+    case 'powerpoint': return <FileBarChart className="h-8 w-8 text-orange-500" />
+    case 'access': return <FileIcon className="h-8 w-8 text-red-700" />
+    case 'archive': return <FileArchive className="h-8 w-8 text-orange-500" />
+    case 'audio': return <FileIcon className="h-8 w-8 text-purple-500" />
     default:
       return <FileIcon className="h-8 w-8 text-gray-500" />
   }
@@ -24,14 +24,14 @@ function getFileIcon(type: MediaFile['type']) {
 function getFormatLabel(type: MediaFile['type'], mimeType: string) {
   const safeMime = mimeType ?? ''
   switch (type) {
-    case 'pdf':         return 'PDF'
-    case 'word':        return safeMime.includes('.document') ? 'DOCX' : 'DOC'
-    case 'excel':       return safeMime.includes('.sheet') ? 'XLSX' : 'XLS'
-    case 'powerpoint':  return safeMime.includes('.presentation') ? 'PPTX' : 'PPT'
-    case 'access':      return 'MDB'
-    case 'archive':     return safeMime.includes('rar') ? 'RAR' : safeMime.includes('7z') ? '7Z' : 'ZIP'
-    case 'audio':       return safeMime.split('/')[1]?.toUpperCase() || 'AUDIO'
-    default:            return safeMime.split('/')[1]?.toUpperCase() || 'FILE'
+    case 'pdf': return 'PDF'
+    case 'word': return safeMime.includes('.document') ? 'DOCX' : 'DOC'
+    case 'excel': return safeMime.includes('.sheet') ? 'XLSX' : 'XLS'
+    case 'powerpoint': return safeMime.includes('.presentation') ? 'PPTX' : 'PPT'
+    case 'access': return 'MDB'
+    case 'archive': return safeMime.includes('rar') ? 'RAR' : safeMime.includes('7z') ? '7Z' : 'ZIP'
+    case 'audio': return safeMime.split('/')[1]?.toUpperCase() || 'AUDIO'
+    default: return safeMime.split('/')[1]?.toUpperCase() || 'FILE'
   }
 }
 
@@ -66,11 +66,11 @@ function FileMessageComp({ file, onRetry }: FileMessageProps) {
           <span>•</span>
           <span>{formatFileSize(file.file_size)}</span>
         </div>
-        
+
         {file.status === 'uploading' && (
           <div className="mt-2 h-1 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-            <div 
-              className="h-full bg-green-500 transition-all duration-300" 
+            <div
+              className="h-full bg-green-500 transition-all duration-300"
               style={{ width: `${file.progress}%` }}
             />
           </div>
@@ -80,7 +80,7 @@ function FileMessageComp({ file, onRetry }: FileMessageProps) {
           <div className="mt-1 flex items-center gap-2 text-xs text-red-500">
             <AlertCircle className="h-3 w-3" />
             <span>Failed</span>
-            <button 
+            <button
               onClick={(e) => {
                 e.stopPropagation()
                 onRetry?.()
@@ -94,8 +94,8 @@ function FileMessageComp({ file, onRetry }: FileMessageProps) {
       </div>
 
       {isReady && (
-        <a 
-          href={file.media_url || '#'} 
+        <a
+          href={file.media_url || '#'}
           download={file.filename}
           className="shrink-0 rounded-full p-1.5 transition-colors hover:bg-black/10 dark:hover:bg-white/10"
           onClick={(e) => e.stopPropagation()}

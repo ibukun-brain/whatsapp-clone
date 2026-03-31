@@ -8,7 +8,7 @@ import {
     AttachmentPlusIcon,
     SendIcon,
 } from "@/components/icons/chats-icon";
-import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Circle, Pause, Play, Send, Mic } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
@@ -28,7 +28,7 @@ import { useUnreadMessages } from "@/hooks/use-unread-messages";
 import FileUploadPreview from "./file-upload-preview";
 import PhotoVideoUploadPreview from "./photo-video-upload-preview";
 import AudioUploadPreview from "./audio-upload-preview";
-import { uploadAttachment } from "@/lib/attachment-upload";
+import { VoiceRecorder } from "./voice-recorder";
 import { ContactSelectModal } from "./contact-select-modal";
 import { Contact } from "@/types";
 import { toast } from "sonner";
@@ -37,25 +37,6 @@ import { MediaViewerProvider } from "@/components/chat/MediaViewerContext";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
-
-const VoiceWaveform = ({ small }: { small?: boolean }) => {
-    const barHeights = [3, 6, 4, 8, 5, 10, 3, 7, 4, 9, 6, 3, 8, 5, 10, 4, 7, 3, 6, 8, 5, 3, 9, 4, 7, 6, 3, 8, 10, 5, 4, 7, 3, 6, 9, 5, 8, 3, 7, 4];
-    return (
-        <div className="flex items-center gap-[1.5px]" style={{ height: small ? 16 : 20 }}>
-            {barHeights.map((h, i) => (
-                <div
-                    key={i}
-                    className="rounded-full bg-[#8696a0] opacity-70"
-                    style={{
-                        width: 2,
-                        height: small ? h * 0.7 : h,
-                        minHeight: 2,
-                    }}
-                />
-            ))}
-        </div>
-    );
-};
 
 const DateSeparator = React.memo(({ label }: { label: string }) => (
     <div className="flex justify-center my-3 text-center">
@@ -185,6 +166,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const mediaInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
+    // ── Voice Recording ──────────────────────────────────────────────
+    const [isRecording, setIsRecording] = React.useState(false);
+    const [voiceDraftBlob, setVoiceDraftBlob] = React.useState<Blob | undefined>(undefined);
+    const [voiceDraftDuration, setVoiceDraftDuration] = React.useState<number>(0);
+    const [voiceDraftMimeType, setVoiceDraftMimeType] = React.useState<string>('');
+
+    const formatRecordingTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
+    };
+
     // ── Draft ─────────────────────────────────────────────────────────
     // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
     const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -277,7 +270,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const messages = chatType === "groupchat" ? processedGroupMessages : processedDirectMessages;
         return messages
             .flatMap(m => m.files || [])
-            .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio');
+            .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
     }, [processedDirectMessages, processedGroupMessages, chatType]);
 
     // ── Scroll Manager Hook ──────────────────────────────────────────
@@ -598,7 +591,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         e.target.value = "";
     };
 
-    const handleSendFiles = (files: File[], captions: Record<number, string>, isDocument?: boolean) => {
+    const handleSendFiles = useCallback((files: File[], captions: Record<number, string>, isDocument?: boolean) => {
         if (!currentUser) return;
 
         // Clear UI immediately for instant feedback
@@ -620,7 +613,72 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             console.error("Failed to upload files:", error);
             toast.error("Failed to upload some files.");
         });
+    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom]);
+
+    const startRecording = useCallback(() => {
+        setIsRecording(true);
+    }, []);
+
+    const formatDraftDuration = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
     };
+
+    const handleVoiceRecordingStop = useCallback((file: File, duration: number) => {
+        setIsRecording(false);
+        setVoiceDraftBlob(undefined);
+        setVoiceDraftDuration(0);
+        setVoiceDraftMimeType('');
+
+        if (!currentUser) return;
+
+        // Upload with voice_recording type and duration
+        uploadMediaFiles([file], {
+            chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
+            context_id: chatId,
+            mediaTypeOverride: 'voice_recording',
+            duration,
+        }, {}).then(() => {
+            scrollToBottom();
+            // Clear voice draft from DB after successful upload
+            if (chatItemIdRef.current) {
+                db.chatlist.update(chatItemIdRef.current, { draft: null });
+            }
+        }).catch((error) => {
+            console.error("Failed to upload voice recording:", error);
+            toast.error("Failed to send voice message.");
+            if (chatItemIdRef.current) {
+                db.chatlist.update(chatItemIdRef.current, { draft: null });
+            }
+        });
+    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom]);
+
+    const handleVoiceDraft = useCallback((blob: Blob, duration: number, mimeType: string) => {
+        // Save voice recording as a draft in IndexedDB
+        if (chatItemIdRef.current) {
+            db.chatlist.update(chatItemIdRef.current, {
+                draft: {
+                    text: `🎙 ${formatDraftDuration(duration)}`,
+                    timestamp: new Date(),
+                    voiceBlob: blob,
+                    voiceDuration: duration,
+                    voiceMimeType: mimeType,
+                },
+            });
+        }
+    }, []);
+
+    const handleVoiceRecordingCancel = useCallback(() => {
+        setIsRecording(false);
+        setVoiceDraftBlob(undefined);
+        setVoiceDraftDuration(0);
+        setVoiceDraftMimeType('');
+        // Clear voice draft from DB
+        if (chatItemIdRef.current) {
+            db.chatlist.update(chatItemIdRef.current, { draft: null });
+        }
+    }, []);
 
     const handleRemoveFile = (index: number) => {
         setPendingFiles(prev => {
@@ -689,6 +747,15 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (draftRestoredForRef.current === chatId) return;
         draftRestoredForRef.current = chatId;
 
+        // Check for voice draft first
+        if (chatItem.draft?.voiceBlob) {
+            setVoiceDraftBlob(chatItem.draft.voiceBlob);
+            setVoiceDraftDuration(chatItem.draft.voiceDuration || 0);
+            setVoiceDraftMimeType(chatItem.draft.voiceMimeType || 'audio/ogg');
+            setIsRecording(true);
+            return;
+        }
+
         const savedDraft = chatItem.draft?.text ?? "";
 
         if (inputRef.current) {
@@ -725,9 +792,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     }, [chatItem, chatId]);
 
     // ─── Draft: flush when leaving a chat (chatId change OR full unmount OR refresh) ────
+    // Use a ref so the cleanup closure always reads the latest value.
+    const isRecordingRef = useRef(isRecording);
+    isRecordingRef.current = isRecording;
+
     useEffect(() => {
         const flushDraft = () => {
             if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+
+            // If a voice recording is active, the VoiceRecorder's onDraft handles saving.
+            // Don't overwrite the voice draft with empty text.
+            if (isRecordingRef.current) return;
+
             const idToSave = chatItemIdRef.current;
             const textToSave = currentInputValueRef.current;
 
@@ -811,473 +887,489 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         <MediaViewerProvider>
             <SidebarInset>
                 <div className="flex bg-[#efeae2] h-screen overflow-hidden">
-                {/* ── Main Chat Section ───────────────────────────── */}
-                <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
-                    {/* ── Header ─────────────────────────────────────────── */}
-                    <ChatHeader
-                        onOpenInfo={() => setIsInfoOpen(true)}
-                        isTyping={isTyping}
-                        directMessageUserInfo={
-                            directMessage ? {
-                                name: directMessage.name as DirectMessageName,
-                                userId: directMessage.direct_message?.dm_user_id as string,
-                                image: directMessage.direct_message?.image as string,
-                                lastSeen: directMessage.direct_message?.last_seen ?? null,
-                                isOnline: !!directMessage.direct_message?.is_online,
-                            } : null
-                        }
-                        groupMessageInfo={
-                            groupMessage ? {
-                                groupId: chatId,
-                                name: groupMessage.name as string,
-                                image: groupMessage.group_chat?.image as string,
-                                onlineUsersCount: groupMessage.group_chat?.online_users
-                            } : null
-                        }
-                        groupMembers={groupMembers}
-                        timezone={currentUser?.timezone}
-                    />
+                    {/* ── Main Chat Section ───────────────────────────── */}
+                    <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
+                        {/* ── Header ─────────────────────────────────────────── */}
+                        <ChatHeader
+                            onOpenInfo={() => setIsInfoOpen(true)}
+                            isTyping={isTyping}
+                            directMessageUserInfo={
+                                directMessage ? {
+                                    name: directMessage.name as DirectMessageName,
+                                    userId: directMessage.direct_message?.dm_user_id as string,
+                                    image: directMessage.direct_message?.image as string,
+                                    lastSeen: directMessage.direct_message?.last_seen ?? null,
+                                    isOnline: !!directMessage.direct_message?.is_online,
+                                } : null
+                            }
+                            groupMessageInfo={
+                                groupMessage ? {
+                                    groupId: chatId,
+                                    name: groupMessage.name as string,
+                                    image: groupMessage.group_chat?.image as string,
+                                    onlineUsersCount: groupMessage.group_chat?.online_users
+                                } : null
+                            }
+                            groupMembers={groupMembers}
+                            timezone={currentUser?.timezone}
+                        />
 
-                    {/* ── Messages + Footer + Upload Preview wrapper ── */}
-                    <div className="flex-1 flex flex-col relative overflow-hidden">
+                        {/* ── Messages + Footer + Upload Preview wrapper ── */}
+                        <div className="flex-1 flex flex-col relative overflow-hidden chat-bg-doodle">
 
-                        {/* ── Messages Area ───────────────────────────────────── */}
-                        <div
-                            ref={scrollContainerRef}
-                            onScroll={handleScroll}
-                            className="flex-1 overflow-y-auto py-4 chat-bg-doodle"
-                        >
-                            {/* direct message chats */}
-                            {currentUser && processedDirectMessages.length > 0 && (() => {
-                                const unreadCount = unreadState.unreadCount;
-                                const firstUnreadId = unreadState.firstUnreadId;
-                                let lastDateLabel = "";
-
-                                return processedDirectMessages.map((msg, index) => {
-                                    const prevMsg = index > 0 ? processedDirectMessages[index - 1] : null;
-                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                    const showSeparator = dateLabel !== lastDateLabel;
-                                    if (showSeparator) lastDateLabel = dateLabel;
-                                    const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
-                                    return (
-                                        <React.Fragment key={msg.client_msg_id || msg.id}>
-                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                            {showSeparator && <DateSeparator label={dateLabel} />}
-                                            <MessageBubble
-                                                msg={msg}
-                                                currentUser={currentUser}
-                                                isDM={true}
-                                                isConsecutive={isConsecutive}
-                                                onShowInfo={setMessageInfoMsg}
-                                                allVisualMedia={allVisualMedia}
-                                            />
-                                        </React.Fragment>
-                                    );
-                                });
-                            })()}
-
-                            {/* group message chats */}
-                            {currentUser && processedGroupMessages.length > 0 && (() => {
-                                const unreadCount = unreadState.unreadCount;
-                                const firstUnreadId = unreadState.firstUnreadId;
-                                let lastDateLabel = "";
-
-                                return processedGroupMessages.map((msg, index) => {
-                                    const prevMsg = index > 0 ? processedGroupMessages[index - 1] : null;
-                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                    const showSeparator = dateLabel !== lastDateLabel;
-                                    if (showSeparator) lastDateLabel = dateLabel;
-                                    const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
-                                    const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
-                                    const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
-                                    return (
-                                        <React.Fragment key={msg.client_msg_id || msg.id}>
-                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                            {showSeparator && <DateSeparator label={dateLabel} />}
-                                            <MessageBubble
-                                                msg={msg}
-                                                currentUser={currentUser}
-                                                isDM={false}
-                                                isConsecutive={isConsecutive}
-                                                onShowInfo={setMessageInfoMsg}
-                                                allVisualMedia={allVisualMedia}
-                                            />
-                                        </React.Fragment>
-                                    );
-                                });
-                            })()}
-                            {/* Bottom anchor — used for scroll-to-bottom */}
-                            <div ref={bottomAnchorRef} className="h-2" />
-                        </div>
-
-                        {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
-                        {groupMessage && typingUsers.length > 0 && (
-                            <div className="flex items-end gap-4 px-4 pb-3">
-                                {/* Stacked mini avatars — up to 3 shown */}
-                                <AvatarGroup>
-                                    {typingUsers.slice(0, 3).map((u) => (
-                                        <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
-                                            <AvatarImage src={u.image || undefined} />
-                                            <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
-                                                {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                    ))}
-                                </AvatarGroup>
-
-                                {/* Typing bubble with three-dot bounce */}
-                                <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
-                                    <span className="typing-dot typing-dot-1" />
-                                    <span className="typing-dot typing-dot-2" />
-                                    <span className="typing-dot typing-dot-3" />
-                                </div>
-                            </div>
-                        )}
-
-                        {/* ── Input Bar ───────────────────────────────────────── */}
-                        <footer className="flex items-center gap-2 px-4 py-[5px] bg-[#f0f2f5] border-l border-[#e9edef]">
-                            {/* Plus (attach) */}
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer outline-none">
-                                        <AttachmentPlusIcon
-                                            style={{ width: "24px", height: "24px" }}
-                                            className="text-[#54656f]"
-                                        />
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                    side="top"
-                                    align="start"
-                                    className="mb-4 48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
-                                >
-                                    <DropdownMenuItem
-                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <FileText size={20} className="text-[#7f66ff]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Document</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem
-                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                        onClick={() => mediaInputRef.current?.click()}
-                                    >
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <ImageIcon size={20} className="text-[#007bfc]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Photos & videos</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <Camera size={20} className="text-[#ff2e74]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Camera</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem
-                                        onClick={() => audioInputRef.current?.click()}
-                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                    >
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <Headphones size={20} className="text-[#ff7f35]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Audio</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem
-                                        onClick={() => setIsContactModalOpen(true)}
-                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                    >
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <UserIcon size={20} className="text-[#0695cc]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Contact</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <BarChart2 size={20} className="text-[#ffbc38]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Poll</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <Calendar size={20} className="text-[#ff2e74]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">Event</span>
-                                    </DropdownMenuItem>
-
-                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                            <StickyNote size={20} className="text-[#00a884]" />
-                                        </div>
-                                        <span className="text-[14.5px] font-normal">New sticker</span>
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-
-                            {/* Emoji */}
-                            <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-colors shrink-0 cursor-pointer">
-                                <EmojiIcon
-                                    style={{ width: "24px", height: "24px" }}
-                                    className="text-[#54656f]"
-                                />
-                            </button>
-
-                            {/* Text Input */}
-                            <div className="flex-1">
-                                <textarea
-                                    ref={inputRef}
-                                    rows={1}
-                                    placeholder="Type a message"
-                                    className="w-full rounded-lg border-none bg-white px-3 py-[9px] text-[15px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
-                                    style={{ maxHeight: 120, overflow: "hidden" }}
-                                    onChange={handleInputChange}
-                                    onKeyDown={handleTyping}
-                                />
-                            </div>
-
-                            {/* Mic / Send */}
-                            <button
-                                onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
-                                onClick={hasText ? handleSendMessage : undefined}
-                                className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#e9edef] transition-all shrink-0 cursor-pointer"
+                            {/* ── Messages Area ───────────────────────────────────── */}
+                            <div
+                                ref={scrollContainerRef}
+                                onScroll={handleScroll}
+                                className="flex-1 overflow-y-auto py-4"
                             >
-                                <span
-                                    className="transition-all duration-150"
-                                    style={{
-                                        display: "inline-flex",
-                                        transform: hasText ? "scale(1.1) rotate(0deg)" : "scale(1) rotate(0deg)",
-                                    }}
-                                >
-                                    {hasText ? (
-                                        <SendIcon
-                                            style={{ width: "24px", height: "24px" }}
-                                            className="text-[#54656f]"
+                                {/* direct message chats */}
+                                {currentUser && processedDirectMessages.length > 0 && (() => {
+                                    const unreadCount = unreadState.unreadCount;
+                                    const firstUnreadId = unreadState.firstUnreadId;
+                                    let lastDateLabel = "";
+
+                                    return processedDirectMessages.map((msg, index) => {
+                                        const prevMsg = index > 0 ? processedDirectMessages[index - 1] : null;
+                                        const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                        const showSeparator = dateLabel !== lastDateLabel;
+                                        if (showSeparator) lastDateLabel = dateLabel;
+                                        const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
+                                        return (
+                                            <React.Fragment key={msg.client_msg_id || msg.id}>
+                                                {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                                {showSeparator && <DateSeparator label={dateLabel} />}
+                                                <MessageBubble
+                                                    msg={msg}
+                                                    currentUser={currentUser}
+                                                    isDM={true}
+                                                    isConsecutive={isConsecutive}
+                                                    onShowInfo={setMessageInfoMsg}
+                                                    allVisualMedia={allVisualMedia}
+                                                />
+                                            </React.Fragment>
+                                        );
+                                    });
+                                })()}
+
+                                {/* group message chats */}
+                                {currentUser && processedGroupMessages.length > 0 && (() => {
+                                    const unreadCount = unreadState.unreadCount;
+                                    const firstUnreadId = unreadState.firstUnreadId;
+                                    let lastDateLabel = "";
+
+                                    return processedGroupMessages.map((msg, index) => {
+                                        const prevMsg = index > 0 ? processedGroupMessages[index - 1] : null;
+                                        const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                        const showSeparator = dateLabel !== lastDateLabel;
+                                        if (showSeparator) lastDateLabel = dateLabel;
+                                        const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
+                                        const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
+                                        const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
+                                        return (
+                                            <React.Fragment key={msg.client_msg_id || msg.id}>
+                                                {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                                {showSeparator && <DateSeparator label={dateLabel} />}
+                                                <MessageBubble
+                                                    msg={msg}
+                                                    currentUser={currentUser}
+                                                    isDM={false}
+                                                    isConsecutive={isConsecutive}
+                                                    onShowInfo={setMessageInfoMsg}
+                                                    allVisualMedia={allVisualMedia}
+                                                />
+                                            </React.Fragment>
+                                        );
+                                    });
+                                })()}
+                                {/* Bottom anchor — used for scroll-to-bottom */}
+                                <div ref={bottomAnchorRef} className="h-2" />
+                            </div>
+
+                            {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
+                            {groupMessage && typingUsers.length > 0 && (
+                                <div className="flex items-end gap-4 px-4 pb-3">
+                                    {/* Stacked mini avatars — up to 3 shown */}
+                                    <AvatarGroup>
+                                        {typingUsers.slice(0, 3).map((u) => (
+                                            <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
+                                                <AvatarImage src={u.image || undefined} />
+                                                <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
+                                                    {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                        ))}
+                                    </AvatarGroup>
+
+                                    {/* Typing bubble with three-dot bounce */}
+                                    <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
+                                        <span className="typing-dot typing-dot-1" />
+                                        <span className="typing-dot typing-dot-2" />
+                                        <span className="typing-dot typing-dot-3" />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ── Input Bar ───────────────────────────────────────── */}
+                            <footer className="flex items-center px-2 py-2 bg-transparent border-none">
+                                <div className="flex items-center flex-1 bg-white rounded-[24px] px-1.5 py-1 gap-1 shadow-sm min-h-[46px]">
+                                    {isRecording ? (
+                                        <VoiceRecorder 
+                                            onStop={handleVoiceRecordingStop} 
+                                            onCancel={handleVoiceRecordingCancel}
+                                            onDraft={handleVoiceDraft}
+                                            draftBlob={voiceDraftBlob}
+                                            draftDuration={voiceDraftDuration}
+                                            draftMimeType={voiceDraftMimeType}
                                         />
                                     ) : (
-                                        <MicrophoneIcon
-                                            style={{ width: "24px", height: "24px" }}
-                                            className="text-[#54656f]"
-                                        />
+                                        <>
+                                            {/* Plus (attach) */}
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer outline-none">
+                                                        <AttachmentPlusIcon
+                                                            style={{ width: "24px", height: "24px" }}
+                                                            className="text-[#54656f]"
+                                                        />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent
+                                                    side="top"
+                                                    align="start"
+                                                    className="mb-4 w-48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                                                >
+                                                    <DropdownMenuItem
+                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                        onClick={() => fileInputRef.current?.click()}
+                                                    >
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <FileText size={20} className="text-[#7f66ff]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Document</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem
+                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                        onClick={() => mediaInputRef.current?.click()}
+                                                    >
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <ImageIcon size={20} className="text-[#007bfc]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Photos & videos</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <Camera size={20} className="text-[#ff2e74]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Camera</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem
+                                                        onClick={() => audioInputRef.current?.click()}
+                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                    >
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <Headphones size={20} className="text-[#ff7f35]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Audio</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem
+                                                        onClick={() => setIsContactModalOpen(true)}
+                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                    >
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <UserIcon size={20} className="text-[#0695cc]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Contact</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <BarChart2 size={20} className="text-[#ffbc38]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Poll</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <Calendar size={20} className="text-[#ff2e74]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">Event</span>
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                            <StickyNote size={20} className="text-[#00a884]" />
+                                                        </div>
+                                                        <span className="text-[14.5px] font-normal">New sticker</span>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+
+                                            {/* Emoji */}
+                                            <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer">
+                                                <EmojiIcon
+                                                    style={{ width: "24px", height: "24px" }}
+                                                    className="text-[#54656f]"
+                                                />
+                                            </button>
+
+                                            {/* Text Input */}
+                                            <div className="flex-1 px-1">
+                                                <textarea
+                                                    ref={inputRef}
+                                                    rows={1}
+                                                    placeholder="Type a message"
+                                                    className="w-full border-none bg-transparent py-[9px] text-[15.5px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
+                                                    style={{ maxHeight: 120, overflow: "hidden" }}
+                                                    onChange={handleInputChange}
+                                                    onKeyDown={handleTyping}
+                                                />
+                                            </div>
+
+                                            {/* Mic / Send */}
+                                            <button
+                                                onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
+                                                onClick={hasText ? handleSendMessage : startRecording}
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer group ${hasText ? "hover:bg-[#f0f2f5]" : "hover:bg-[#00a884]"
+                                                    }`}
+                                            >
+                                                <span
+                                                    className="transition-all duration-150"
+                                                    style={{
+                                                        display: "inline-flex",
+                                                        transform: hasText ? "scale(1.05) rotate(0deg)" : "scale(1) rotate(0deg)",
+                                                    }}
+                                                >
+                                                    {hasText ? (
+                                                        <SendIcon
+                                                            style={{ width: "24px", height: "24px" }}
+                                                            className="text-[#54656f]"
+                                                        />
+                                                    ) : (
+                                                        <MicrophoneIcon
+                                                            style={{ width: "24px", height: "24px" }}
+                                                            className="text-[#54656f] group-hover:text-white"
+                                                        />
+                                                    )}
+                                                </span>
+                                            </button>
+                                        </>
                                     )}
-                                </span>
-                            </button>
-                        </footer>
+                                </div>
+                            </footer>
 
-                        {/* Hidden Inputs */}
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            multiple
-                            onChange={handleFileSelect}
-                        />
-                        <input
-                            type="file"
-                            ref={mediaInputRef}
-                            className="hidden"
-                            accept="image/*,video/*"
-                            multiple
-                            onChange={handleMediaSelect}
-                        />
-                        <input
-                            type="file"
-                            ref={audioInputRef}
-                            className="hidden"
-                            accept="audio/*"
-                            multiple
-                            onChange={handleAudioSelect}
-                        />
-
-                        {/* File Upload Preview Overlay (covers messages + footer only) */}
-                        {isPreviewOpen && (
-                            <FileUploadPreview
-                                files={pendingFiles}
-                                onClose={() => {
-                                    setIsPreviewOpen(false);
-                                    setPendingFiles([]);
-                                }}
-                                onSend={handleSendFiles}
-                                onAddMore={() => {
-                                    fileInputRef.current?.click();
-                                }}
-                                onRemoveFile={handleRemoveFile}
+                            {/* Hidden Inputs */}
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                className="hidden"
+                                multiple
+                                onChange={handleFileSelect}
                             />
-                        )}
-
-                        {/* Photo/Video Editor Preview */}
-                        {isMediaPreviewOpen && (
-                            <PhotoVideoUploadPreview
-                                files={pendingMedia}
-                                onClose={() => {
-                                    setIsMediaPreviewOpen(false);
-                                    setPendingMedia([]);
-                                }}
-                                onSend={handleSendFiles} // Reuse same send logic
-                                onAddMore={() => {
-                                    mediaInputRef.current?.click();
-                                }}
-                                onRemoveFile={handleRemoveMediaFile}
+                            <input
+                                type="file"
+                                ref={mediaInputRef}
+                                className="hidden"
+                                accept="image/*,video/*"
+                                multiple
+                                onChange={handleMediaSelect}
                             />
-                        )}
-
-                        {/* Audio Editor Preview */}
-                        {isAudioPreviewOpen && (
-                            <AudioUploadPreview
-                                files={pendingAudio}
-                                onClose={() => {
-                                    setIsAudioPreviewOpen(false);
-                                    setPendingAudio([]);
-                                }}
-                                onSend={handleSendFiles}
-                                onAddMore={() => {
-                                    audioInputRef.current?.click();
-                                }}
-                                onRemoveFile={handleRemoveAudioFile}
+                            <input
+                                type="file"
+                                ref={audioInputRef}
+                                className="hidden"
+                                accept="audio/*"
+                                multiple
+                                onChange={handleAudioSelect}
                             />
-                        )}
 
-                        {/* Contact Select Modal */}
-                        {isContactModalOpen && (
-                            <ContactSelectModal
-                                isOpen={isContactModalOpen}
-                                onClose={() => setIsContactModalOpen(false)}
-                                onSend={handleSendContacts}
-                            />
-                        )}
+                            {/* File Upload Preview Overlay (covers messages + footer only) */}
+                            {isPreviewOpen && (
+                                <FileUploadPreview
+                                    files={pendingFiles}
+                                    onClose={() => {
+                                        setIsPreviewOpen(false);
+                                        setPendingFiles([]);
+                                    }}
+                                    onSend={handleSendFiles}
+                                    onAddMore={() => {
+                                        fileInputRef.current?.click();
+                                    }}
+                                    onRemoveFile={handleRemoveFile}
+                                />
+                            )}
 
-                    </div>{/* end relative wrapper */}
-                </div>
+                            {/* Photo/Video Editor Preview */}
+                            {isMediaPreviewOpen && (
+                                <PhotoVideoUploadPreview
+                                    files={pendingMedia}
+                                    onClose={() => {
+                                        setIsMediaPreviewOpen(false);
+                                        setPendingMedia([]);
+                                    }}
+                                    onSend={handleSendFiles} // Reuse same send logic
+                                    onAddMore={() => {
+                                        mediaInputRef.current?.click();
+                                    }}
+                                    onRemoveFile={handleRemoveMediaFile}
+                                />
+                            )}
 
-                {/* ── Side Info Panel (Contact/Message Info) ───────────────────────────── */}
-                {messageInfoMsg ? (
-                    <div className="w-[400px] lg:w-[450px] border-l border-[#d1d7db] bg-white flex flex-col h-full animate-in slide-in-from-right duration-300">
-                        {/* Header */}
-                        <div className="flex items-center gap-6 px-4 py-3 bg-white h-[60px] border-b border-[#f0f2f5]">
-                            <button onClick={() => setMessageInfoMsg(null)} className="text-[#54656f] hover:text-[#111b21] transition-colors">
-                                <X size={24} />
-                            </button>
-                            <h2 className="text-[17px] font-medium text-[#111b21]">Message info</h2>
-                        </div>
+                            {/* Audio Editor Preview */}
+                            {isAudioPreviewOpen && (
+                                <AudioUploadPreview
+                                    files={pendingAudio}
+                                    onClose={() => {
+                                        setIsAudioPreviewOpen(false);
+                                        setPendingAudio([]);
+                                    }}
+                                    onSend={handleSendFiles}
+                                    onAddMore={() => {
+                                        audioInputRef.current?.click();
+                                    }}
+                                    onRemoveFile={handleRemoveAudioFile}
+                                />
+                            )}
 
-                        {/* Content Area */}
-                        <div className="flex-1 overflow-y-auto bg-[#efeae2] info-sheet-scrollbar">
-                            {/* Bubble Preview Area with Doodle Background */}
-                            <div className="relative pt-6 pb-4 px-6 doodle-bg flex justify-center items-start chat-bg-doodle min-h-[140px]">
-                                {/* <div className="absolute inset-0 opacity-10 pointer-events-none" ></div> */}
-                                <div className={`relative max-w-[85%] ${((typeof messageInfoMsg.user === 'object' ? messageInfoMsg.user.id : messageInfoMsg.user) === currentUser?.id) ? 'bubble-sent' : 'bubble-received'} shadow-sm px-2.5 py-1 z-10`}>
-                                    <div className="flex flex-col min-w-[120px]">
-                                        <p className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap pr-1">{messageInfoMsg.content}</p>
-                                        <div className="flex items-center justify-end gap-1 h-4">
-                                            <span className="text-[11px] text-[#667781] leading-none">
-                                                {getDateTimeByTimezone(messageInfoMsg.timestamp, currentUser?.timezone || "utc").time}
-                                            </span>
+                            {/* Contact Select Modal */}
+                            {isContactModalOpen && (
+                                <ContactSelectModal
+                                    isOpen={isContactModalOpen}
+                                    onClose={() => setIsContactModalOpen(false)}
+                                    onSend={handleSendContacts}
+                                />
+                            )}
+
+                        </div>{/* end relative wrapper */}
+                    </div>
+
+                    {/* ── Side Info Panel (Contact/Message Info) ───────────────────────────── */}
+                    {messageInfoMsg ? (
+                        <div className="w-[400px] lg:w-[450px] border-l border-[#d1d7db] bg-white flex flex-col h-full animate-in slide-in-from-right duration-300">
+                            {/* Header */}
+                            <div className="flex items-center gap-6 px-4 py-3 bg-white h-[60px] border-b border-[#f0f2f5]">
+                                <button onClick={() => setMessageInfoMsg(null)} className="text-[#54656f] hover:text-[#111b21] transition-colors">
+                                    <X size={24} />
+                                </button>
+                                <h2 className="text-[17px] font-medium text-[#111b21]">Message info</h2>
+                            </div>
+
+                            {/* Content Area */}
+                            <div className="flex-1 overflow-y-auto bg-[#efeae2] info-sheet-scrollbar">
+                                {/* Bubble Preview Area with Doodle Background */}
+                                <div className="relative pt-6 pb-4 px-6 doodle-bg flex justify-center items-start chat-bg-doodle min-h-[140px]">
+                                    {/* <div className="absolute inset-0 opacity-10 pointer-events-none" ></div> */}
+                                    <div className={`relative max-w-[85%] ${((typeof messageInfoMsg.user === 'object' ? messageInfoMsg.user.id : messageInfoMsg.user) === currentUser?.id) ? 'bubble-sent' : 'bubble-received'} shadow-sm px-2.5 py-1 z-10`}>
+                                        <div className="flex flex-col min-w-[120px]">
+                                            <p className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap pr-1">{messageInfoMsg.content}</p>
+                                            <div className="flex items-center justify-end gap-1 h-4">
+                                                <span className="text-[11px] text-[#667781] leading-none">
+                                                    {getDateTimeByTimezone(messageInfoMsg.timestamp, currentUser?.timezone || "utc").time}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Info Sections */}
-                            <div className="bg-white flex flex-col">
-                                <div className="px-6 py-4 flex items-center gap-2">
-                                    <CheckIcon2_ height={18} width={18} className="text-[#53bdeb]" />
-                                    <span className="text-[14px] text-[#008069] font-medium tracking-wide">Read by</span>
-                                </div>
-                                <div className="space-y-0.5 border-t border-[#f0f2f5]">
-                                    {messageReadRecipients && messageReadRecipients.length > 0 && (
-                                        messageReadRecipients.map((recipient) => (
-                                            <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
-                                                <Avatar className="h-10 w-10">
-                                                    <AvatarImage src={recipient.user.profile_pic} />
-                                                    <AvatarFallback className="text-sm bg-[#dfe5e7]">
-                                                        {recipient.contact_name?.slice(0, 1).toUpperCase() || 'U'}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                                <div className="flex-1 py-2">
-                                                    <div className="flex justify-between items-center">
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
-                                                            <span className="text-[12px] text-[#667781]">
-                                                                {recipient.read_date && formatDatetime(recipient.read_date, currentUser?.timezone || "utc")}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-
-                                {
-                                    messageDeliveredRecipients && messageDeliveredRecipients.length > 0 && (
-                                        <>
-                                            <div className="px-6 py-4 flex items-center gap-4 mt-2 border-t border-[#f0f2f5]">
-                                                <CheckIcon2_ height={18} width={18} className="text-[#8696a0]" />
-                                                <span className="text-[14px] text-[#667781] font-medium tracking-wide">Delivered</span>
-                                            </div>
-                                            <div className="space-y-0.5 border-t">
-                                                {messageDeliveredRecipients.map((recipient) => (
-                                                    <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
-                                                        <Avatar className="h-10 w-10">
-                                                            <AvatarImage src={recipient.user.profile_pic} />
-                                                            <AvatarFallback className="text-sm bg-[#dfe5e7]">
-                                                                {recipient.contact_name?.slice(0, 1).toUpperCase() || 'M'}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div className="flex-1 border-b border-[#f0f2f5] py-2">
-                                                            <div className="flex justify-between items-center">
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
-                                                                    <span className="text-[12px] text-[#667781]">
-                                                                        {recipient.delivered_date && formatDatetime(recipient.delivered_date, currentUser?.timezone || "utc")}
-                                                                    </span>
-                                                                </div>
+                                {/* Info Sections */}
+                                <div className="bg-white flex flex-col">
+                                    <div className="px-6 py-4 flex items-center gap-2">
+                                        <CheckIcon2_ height={18} width={18} className="text-[#53bdeb]" />
+                                        <span className="text-[14px] text-[#008069] font-medium tracking-wide">Read by</span>
+                                    </div>
+                                    <div className="space-y-0.5 border-t border-[#f0f2f5]">
+                                        {messageReadRecipients && messageReadRecipients.length > 0 && (
+                                            messageReadRecipients.map((recipient) => (
+                                                <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                    <Avatar className="h-10 w-10">
+                                                        <AvatarImage src={recipient.user.profile_pic} />
+                                                        <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                            {recipient.contact_name?.slice(0, 1).toUpperCase() || 'U'}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                    <div className="flex-1 py-2">
+                                                        <div className="flex justify-between items-center">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                                <span className="text-[12px] text-[#667781]">
+                                                                    {recipient.read_date && formatDatetime(recipient.read_date, currentUser?.timezone || "utc")}
+                                                                </span>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                ))
-                                                }
-                                            </div>
-                                        </>
-                                    )
-                                }
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
 
+                                    {
+                                        messageDeliveredRecipients && messageDeliveredRecipients.length > 0 && (
+                                            <>
+                                                <div className="px-6 py-4 flex items-center gap-4 mt-2 border-t border-[#f0f2f5]">
+                                                    <CheckIcon2_ height={18} width={18} className="text-[#8696a0]" />
+                                                    <span className="text-[14px] text-[#667781] font-medium tracking-wide">Delivered</span>
+                                                </div>
+                                                <div className="space-y-0.5 border-t">
+                                                    {messageDeliveredRecipients.map((recipient) => (
+                                                        <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                            <Avatar className="h-10 w-10">
+                                                                <AvatarImage src={recipient.user.profile_pic} />
+                                                                <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                                    {recipient.contact_name?.slice(0, 1).toUpperCase() || 'M'}
+                                                                </AvatarFallback>
+                                                            </Avatar>
+                                                            <div className="flex-1 border-b border-[#f0f2f5] py-2">
+                                                                <div className="flex justify-between items-center">
+                                                                    <div className="flex flex-col">
+                                                                        <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                                        <span className="text-[12px] text-[#667781]">
+                                                                            {recipient.delivered_date && formatDatetime(recipient.delivered_date, currentUser?.timezone || "utc")}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                    }
+                                                </div>
+                                            </>
+                                        )
+                                    }
+
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ) : isInfoOpen ? (
-                    <ContactInfo
-                        onClose={() => setIsInfoOpen(false)}
-                        directMessageUserInfo={
-                            directMessage && {
-                                name: directMessage.name as DirectMessageName,
-                                userId: directMessage.direct_message?.recent_user_id as string,
-                                image: directMessage.direct_message?.image as string,
-                                bio: directMessage.direct_message?.bio,
-                                phone: directMessage.direct_message?.phone,
-                                groupsInCommon: dmGroupsInCommon,
+                    ) : isInfoOpen ? (
+                        <ContactInfo
+                            onClose={() => setIsInfoOpen(false)}
+                            directMessageUserInfo={
+                                directMessage && {
+                                    name: directMessage.name as DirectMessageName,
+                                    userId: directMessage.direct_message?.recent_user_id as string,
+                                    image: directMessage.direct_message?.image as string,
+                                    bio: directMessage.direct_message?.bio,
+                                    phone: directMessage.direct_message?.phone,
+                                    groupsInCommon: dmGroupsInCommon,
+                                }
                             }
-                        }
-                        groupMessageInfo={
-                            groupMessage && {
-                                groupId: chatId,
-                                groupchat: groupInfo,
-                                currentUser: currentUser,
-                                name: groupMessage.name as string,
-                                image: groupMessage.group_chat?.image as string
+                            groupMessageInfo={
+                                groupMessage && {
+                                    groupId: chatId,
+                                    groupchat: groupInfo,
+                                    currentUser: currentUser,
+                                    name: groupMessage.name as string,
+                                    image: groupMessage.group_chat?.image as string
+                                }
                             }
-                        }
-                        groupMembers={groupMembers}
-                    />
-                ) : null}
-            </div>
-        </SidebarInset>
+                            groupMembers={groupMembers}
+                        />
+                    ) : null}
+                </div>
+            </SidebarInset>
         </MediaViewerProvider>
     );
 };

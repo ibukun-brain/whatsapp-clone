@@ -54,7 +54,7 @@ const ReadReceipt = ({
     // 2. Check for failures
     const hasFailed = files?.some(f => f.status === 'failed') || receipt === 'failed' || (receipt as any) === 'failed';
     if (hasFailed) {
-        return <AlertCircle className="h-4 w-4 text-red-500" />;
+        return <AlertCircle className="h-3 w-3 text-red-500" />;
     }
 
     // 3. Normal receipt logic
@@ -211,7 +211,7 @@ const MessageBubble = ({
 
     const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
     const { cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
-    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video' || f.type === 'audio');
+    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
 
     const messageStatusKey = `${msg.isOptimistic}-${msg.content ? 'hasContent' : 'noContent'}-${isDM
         ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))

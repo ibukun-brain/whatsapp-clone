@@ -5,6 +5,7 @@ import ImageMessage from './ImageMessage'
 import VideoMessage from './VideoMessage'
 import FileMessage from './FileMessage'
 import AudioMessage from './AudioMessage'
+import VoiceMessage from './VoiceMessage'
 import MediaViewer from './MediaViewer'
 import { useMediaViewer } from './MediaViewerContext'
 import { cn, getDateTimeByTimezone } from '@/lib/utils'
@@ -24,14 +25,14 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
   const { openViewer } = useMediaViewer()
 
   // Collect all viewable files (image, video, audio) for the local grid
-  const viewableFiles = files.filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio')
+  const viewableFiles = files.filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording')
 
   const openViewerHandler = useCallback((file: MediaFile) => {
     // We want to open the viewer using the CHAT-WIDE visual media array
     const mediaToUse = allVisualMedia.length > 0 ? allVisualMedia : viewableFiles
     const idx = mediaToUse.findIndex(f => f.file_id === file.file_id)
 
-    if (idx >= 0 && (file.media_url || file.preview_url)) {
+    if (idx >= 0 && (file.media_url || file.preview_url || file.file_blob)) {
       openViewer(mediaToUse, idx)
     }
   }, [viewableFiles, allVisualMedia, openViewer])
@@ -170,6 +171,11 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
         <div className={cn("flex flex-col gap-1", visuals.length > 0 && "mt-1")}>
           {attachments.map(file => {
             const { time: fileTime } = getDateTimeByTimezone(file.timestamp, userTimezone)
+            if (file.type === 'voice_recording') {
+              return (
+                <VoiceMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
+              )
+            }
             return file.type === 'audio' ? (
               <div key={file.file_id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); openViewerHandler(file) }}>
                 <AudioMessage file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />

@@ -92,6 +92,9 @@ export type Chat = {
   draft?: {
     text: string;
     timestamp: Date;
+    voiceBlob?: Blob;
+    voiceDuration?: number;
+    voiceMimeType?: string;
   } | null;
   direct_message: DirectMessage | null;
   group_chat: GroupChat | null;

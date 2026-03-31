@@ -71,7 +71,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
         />
       ) : (
         <div className="relative h-full w-full">
-          {videoSrc && file.status !== 'failed' && (
+          {videoSrc && (
             <video
               src={videoSrc}
               className="h-full w-full object-cover opacity-80"
@@ -117,24 +117,19 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
 
       {/* Failed / Not Downloaded State (The Pill) */}
       {(file.status === 'failed' || (!isReady && !blobUrl && !file.preview_url)) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/10 backdrop-blur-[1px]">
+        <div className="absolute top-2 left-2 z-30">
           <button
             onClick={(e) => {
               e.stopPropagation()
               onRetry?.()
             }}
-            className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2.5 text-[13px] font-medium text-white hover:bg-black/70 transition-all active:scale-95 shadow-lg border border-white/10 z-30"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 shadow-lg border border-white/20 text-white hover:bg-black/80 transition-all active:scale-95"
+            title={isMine ? "Retry Upload" : "Download"}
           >
             {isMine ? (
-              <>
-                <RefreshCw className="h-5 w-5" strokeWidth={2.5} />
-                <span>Retry</span>
-              </>
+              <RefreshCw className="h-4 w-4" strokeWidth={2.5} />
             ) : (
-              <>
-                <Download className="h-5 w-5" strokeWidth={2.5} />
-                <span>{formatFileSize(file.file_size)}</span>
-              </>
+              <Download className="h-4 w-4" strokeWidth={2.5} />
             )}
           </button>
         </div>

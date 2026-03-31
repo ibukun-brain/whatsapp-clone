@@ -468,10 +468,18 @@ export const SecondarySidebar = () => {
 
                               // ── Draft indicator (second priority) ────────────────────
                               if (chat.draft?.text && chatItemId !== activeChatId) {
+                                const isVoiceDraft = !!chat.draft.voiceBlob;
                                 return (
-                                  <span className="inline-flex gap-1 items-baseline">
+                                  <span className="inline-flex gap-1 items-center">
                                     <span className="text-[#1daa61] font-medium shrink-0">Draft:</span>
-                                    <span className="truncate text-muted-foreground">{chat.draft.text}</span>
+                                    {isVoiceDraft ? (
+                                      <span className="flex items-center gap-1 text-muted-foreground">
+                                        <Mic size={14} className="shrink-0" />
+                                        <span>{chat.draft.text.replace('🎙 ', '')}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="truncate text-muted-foreground">{chat.draft.text}</span>
+                                    )}
                                   </span>
                                 );
                               }
@@ -516,6 +524,9 @@ export const SecondarySidebar = () => {
                                       if (fileType === 'video') {
                                         IconComp = Video;
                                         label = "Video";
+                                      } else if (fileType === 'voice_recording') {
+                                        IconComp = Mic;
+                                        label = "Voice message";
                                       } else if (fileType === 'audio') {
                                         IconComp = type === 'voice' ? Mic : Headphones;
                                         label = type === 'voice' ? "Voice message" : "Audio";
