@@ -17,7 +17,7 @@ export interface MediaFile {
   mime_type: string
   file_size: number
   caption?: string
-  duration?: number        // added for audio/video duration
+  duration?: string        // stored as HH:MM:SS
   file_blob?: Blob // Store for retry support
 }
 
@@ -51,5 +51,5 @@ export interface UploadContext {
   caption?: string
   forceDocument?: boolean
   mediaTypeOverride?: string   // e.g. 'voice_recording'
-  duration?: number            // audio/voice duration in seconds
+  duration?: string            // duration as HH:MM:SS
 }

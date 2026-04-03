@@ -25,6 +25,40 @@ export function getValidFilename(name: string): string {
     .replace(/[^a-zA-Z0-9_\-.]/g, "");
 }
 
+/**
+ * Formats duration in seconds or as a time string (HH:MM:SS) to m:ss or h:mm:ss.
+ */
+export function formatDuration(seconds: number | string = 0): string {
+  let totalSeconds = 0;
+  if (typeof seconds === 'string') {
+    if (seconds.includes(':')) {
+      const parts = seconds.split(':').map(Number);
+      if (parts.length === 3) {
+        totalSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        totalSeconds = parts[0] * 60 + parts[1];
+      } else {
+        totalSeconds = parts[0] || 0;
+      }
+    } else {
+      totalSeconds = parseFloat(seconds);
+    }
+  } else {
+    totalSeconds = seconds;
+  }
+
+  if (isNaN(totalSeconds) || totalSeconds < 0) return "0:00";
+
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 
 /**
  * Humanizes a date based on the following criteria:

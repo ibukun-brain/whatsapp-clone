@@ -247,7 +247,17 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        return groupMediaMessages(combined);
+        
+        // Deduplicate by client_msg_id to prevent key collisions
+        const seenClientIds = new Set();
+        const unique = combined.filter(m => {
+            if (!m.client_msg_id) return true;
+            if (seenClientIds.has(m.client_msg_id)) return false;
+            seenClientIds.add(m.client_msg_id);
+            return true;
+        });
+
+        return groupMediaMessages(unique);
     }, [directMessageChats, localOptimisticMessages, chatId, chatType]);
 
     const processedGroupMessages = useMemo(() => {
@@ -263,7 +273,17 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        return groupMediaMessages(combined);
+        
+        // Deduplicate by client_msg_id to prevent key collisions
+        const seenClientIds = new Set();
+        const unique = combined.filter(m => {
+            if (!m.client_msg_id) return true;
+            if (seenClientIds.has(m.client_msg_id)) return false;
+            seenClientIds.add(m.client_msg_id);
+            return true;
+        });
+
+        return groupMediaMessages(unique);
     }, [groupMessageChats, localOptimisticMessages, chatId, chatType]);
 
     const allVisualMedia = useMemo(() => {
@@ -365,7 +385,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 .where('groupchat_id').equals(chatId)
                 .and(m => {
                     const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
-                    return mUserId === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content;
+                    return (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || 
+                           (mUserId === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content);
                 })
                 .delete()
                 .then(() => {
@@ -625,6 +646,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         return `${mins}:${secs.toString().padStart(2, "0")}`;
     };
 
+    const formatDurationHMS = (seconds: number) => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
     const handleVoiceRecordingStop = useCallback((file: File, duration: number) => {
         setIsRecording(false);
         setVoiceDraftBlob(undefined);
@@ -638,7 +666,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
             context_id: chatId,
             mediaTypeOverride: 'voice_recording',
-            duration,
+            duration: formatDurationHMS(duration),
         }, {}).then(() => {
             scrollToBottom();
             // Clear voice draft from DB after successful upload
@@ -829,7 +857,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             const fetchGroupMembers = async () => {
                 const members = await db.groupmembers.where('groupchat_id').equals(chatId).toArray()
                 if (members.length > 0) {
-                    setGroupMembers(members.filter((member) => member.user?.id !== currentUser.id))
+                    setGroupMembers(members)
                     setGroupInfo(members[0].groupchat)
                 } else {
                     try {
@@ -838,7 +866,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         if (groupMembersRes.data && groupMembersRes.data.results.length > 0) {
                             await db.groupmembers.clear();
                             await db.groupmembers.bulkPut(groupMembersRes.data.results);
-                            setGroupMembers(groupMembersRes.data.results.filter((member) => member.user?.id !== currentUser.id));
+                            setGroupMembers(groupMembersRes.data.results);
                             setGroupInfo(groupMembersRes.data.results[0].groupchat)
                         }
 
@@ -936,7 +964,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                         if (showSeparator) lastDateLabel = dateLabel;
                                         const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
                                         return (
-                                            <React.Fragment key={msg.client_msg_id || msg.id}>
+                                            <React.Fragment key={msg.id}>
                                                 {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                                 {showSeparator && <DateSeparator label={dateLabel} />}
                                                 <MessageBubble
@@ -967,7 +995,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                         const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
                                         const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
                                         return (
-                                            <React.Fragment key={msg.client_msg_id || msg.id}>
+                                            <React.Fragment key={msg.id}>
                                                 {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
                                                 {showSeparator && <DateSeparator label={dateLabel} />}
                                                 <MessageBubble

@@ -7,6 +7,7 @@ import PdfAttachmentPreview from "./pdf-attachment-preview";
 import MediaGrid from "@/components/chat/MediaGrid";
 import { useMediaUpload } from "@/hooks/use-media-upload";
 import { MediaFile } from "@/types/mediaTypes";
+import VoiceMessage from "@/components/chat/VoiceMessage";
 import {
     ContextMenu,
     ContextMenuContent,
@@ -36,23 +37,25 @@ const ReadReceipt = ({
     read_date,
     delivered_date,
     receipt,
+    status,
     isOptimistic,
     files
 }: {
     read_date?: Date,
     delivered_date?: Date,
     receipt?: "sent" | "delivered" | "read" | "failed",
+    status?: 'pending' | 'sent' | 'failed' | 'processing' | 'uploading',
     isOptimistic?: boolean,
     files?: MediaFile[]
 }) => {
     // 1. Check for active uploads/processing
-    const isUploading = files?.some(f => f.status === 'uploading' || f.status === 'processing');
+    const isUploading = status === 'pending' || status === 'processing' || status === 'uploading' || files?.some(f => f.status === 'uploading' || f.status === 'processing');
     if (isUploading) {
         return <Clock className="h-3 w-3 text-[#8696a0]" />;
     }
 
     // 2. Check for failures
-    const hasFailed = files?.some(f => f.status === 'failed') || receipt === 'failed' || (receipt as any) === 'failed';
+    const hasFailed = status === 'failed' || files?.some(f => f.status === 'failed') || receipt === 'failed' || (receipt as any) === 'failed';
     if (hasFailed) {
         return <AlertCircle className="h-3 w-3 text-red-500" />;
     }
@@ -211,7 +214,7 @@ const MessageBubble = ({
 
     const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
     const { cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
-    const hasVisuals = msg.files?.some(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
+    const hasVisuals = msg.voice_message || msg.files?.some(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
 
     const messageStatusKey = `${msg.isOptimistic}-${msg.content ? 'hasContent' : 'noContent'}-${isDM
         ? (String((msg as DirectMessageChats).read_date || 'no-read') + '-' + String((msg as DirectMessageChats).delivered_date || 'no-del'))
@@ -238,9 +241,26 @@ const MessageBubble = ({
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             userTimezone={currentUser.timezone}
-                                            receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
+                                            receipt={isMine ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
                                             messageStatus={messageStatusKey}
                                             allVisualMedia={allVisualMedia}
+                                        />
+                                    </div>
+                                )}
+
+                                {msg.voice_message && (
+                                    <div className="mb-1">
+                                        <VoiceMessage 
+                                            voice_message={msg.voice_message}
+                                            voice_message_duration={msg.voice_message_duration}
+                                            status={msg.status}
+                                            isMine={isMine}
+                                            timestamp={time}
+                                            onRetry={() => retryUpload(null, msg.id, isDM ? 'directmessage' : 'group_chat')}
+                                            onCancel={() => cancelUpload('', msg.id, isDM ? 'directmessage' : 'group_chat')}
+                                            receipt={isMine ? <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
+                                            chatId={chatId}
+                                            isDM={isDM}
                                         />
                                     </div>
                                 )}
@@ -304,12 +324,29 @@ const MessageBubble = ({
                                             onRetry={(file) => retryUpload(file, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={(file) => cancelUpload(file.file_id, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             userTimezone={currentUser.timezone}
-                                            receipt={isMine ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
+                                            receipt={isMine ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
                                             messageStatus={messageStatusKey}
                                             allVisualMedia={allVisualMedia}
                                         />
 
 
+                                    </div>
+                                )}
+
+                                {msg.voice_message && (
+                                    <div className="mb-1 px-1">
+                                        <VoiceMessage 
+                                            voice_message={msg.voice_message}
+                                            voice_message_duration={msg.voice_message_duration}
+                                            status={msg.status}
+                                            isMine={isMine}
+                                            timestamp={time}
+                                            receipt={isMine ? <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
+                                            senderName={isMine ? currentUser.display_name : (msg.user as User)?.display_name}
+                                            senderAvatar={isMine ? currentUser.profile_pic : (msg.user as User)?.profile_pic}
+                                            chatId={chatId}
+                                            isDM={isDM}
+                                        />
                                     </div>
                                 )}
 

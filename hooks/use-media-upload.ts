@@ -42,6 +42,13 @@ const ARCHIVE_MIMES = new Set([
   'application/x-xz',
 ])
 
+export function formatDurationHMS(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
+
 export function getMediaType(mimeType: string, forceDocument?: boolean): MediaFile['type'] {
   if (!forceDocument) {
     if (mimeType.startsWith('image/')) return 'image'
@@ -93,6 +100,10 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
   const handleMediaReady = useCallback(async ({ data }: MediaReadyEvent) => {
     console.log('Media Ready Event Received:', data)
     const table = data.chat_type === 'directmessage' ? db.directmessagechats : db.groupmessagechats
+    if (!data.files) {
+      console.warn('CRITICAL: media_ready event missing files data. Skipping update.');
+      return;
+    }
     // Search both ID (temp or real)
     let message = await table.get(data.message_id)
     let currentId = data.message_id
@@ -112,10 +123,33 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         currentId = message.id
       } else {
         console.warn('CRITICAL: Message NOT FOUND even by fallback. Skipping update.')
+        return; // Fixed lint: message must exist
       }
     }
 
-    const fileData = data.files
+    if (!message) return; // Added for type safety
+
+    const fileData = data.files;
+    if (!fileData) return; 
+
+    
+    // Handle Voice Message Update
+    if (message.voice_message && message.type === 'voice_recording') {
+      if (currentId !== data.message_id) {
+        await table.delete(currentId);
+      }
+      await (table as any).put({
+        ...message,
+        id: data.message_id,
+        isOptimistic: false,
+        status: 'sent',
+        voice_message: fileData.media_url,
+      });
+      console.log('Voice Message record updated to READY.');
+      activeUploads.current.delete(fileData.file_id);
+      return;
+    }
+
     if (!message || !message.files) {
       console.warn('CRITICAL: Message NOT FOUND even by fallback or missing files array. Skipping update.')
       return
@@ -222,7 +256,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           filename: getValidFilename(file.name),
           mime_type: tempFilesMimeType,
           file_size: file.size,
-          duration: context.duration ?? duration,
+          duration: context.duration ?? (duration !== undefined ? formatDurationHMS(duration) : undefined),
           caption: captions?.[index] || context.caption,
           file_blob: file, // Store for retry
           timestamp,
@@ -231,6 +265,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       }
     }))
 
+    const isVoice = context.mediaTypeOverride === 'voice_recording';
     const initialMediaFiles = mediaFilesWithOriginals.map(m => m.mediaFile)
 
     // 2. Create ONE message for all files
@@ -242,21 +277,26 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         user: currentUser.id,
         reply: null,
         content: '',
-        type: 'media',
+        type: isVoice ? 'voice_recording' : 'media',
         depth: null,
         forwarded: false,
         edited: false,
         deleted: false,
         timestamp,
         isOptimistic: true,
-        files: initialMediaFiles,
+        status: 'pending',
+        files: isVoice ? undefined : initialMediaFiles,
+        voice_message: isVoice ? (initialMediaFiles[0].preview_url ?? undefined) : undefined,
+        voice_message_duration: isVoice ? initialMediaFiles[0].duration : undefined,
+        voice_message_blob: isVoice ? initialMediaFiles[0].file_blob : undefined,
+        voice_message_file_id: isVoice ? initialMediaFiles[0].file_id : undefined,
       })
     } else {
       await db.groupmessagechats.put({
         id: dbId,
         groupchat_id: context.context_id,
         user: currentUser,
-        type: 'media',
+        type: isVoice ? 'voice_recording' : 'media',
         contact_name: currentUser.display_name,
         reply: null,
         content: '',
@@ -266,9 +306,14 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         deleted: false,
         timestamp,
         receipt: 'sent',
+        status: 'pending',
         isOptimistic: true,
         client_msg_id: clientMsgId,
-        files: initialMediaFiles,
+        files: isVoice ? undefined : initialMediaFiles,
+        voice_message: isVoice ? (initialMediaFiles[0].preview_url ?? undefined) : undefined,
+        voice_message_duration: isVoice ? initialMediaFiles[0].duration : undefined,
+        voice_message_blob: isVoice ? initialMediaFiles[0].file_blob : undefined,
+        voice_message_file_id: isVoice ? initialMediaFiles[0].file_id : undefined,
       })
     }
 
@@ -289,6 +334,13 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           signal: controller.signal,
           onProgress: async (progress) => {
             const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
+            if (!msg) return;
+            
+            if (msg.type === 'voice_recording') {
+                await table.update(msg.id, { status: 'processing' });
+                return;
+            }
+
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, progress } : f
@@ -298,6 +350,14 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           },
           onComplete: async (uploadId) => {
             const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
+            if (!msg) return;
+
+            if (msg.type === 'voice_recording') {
+                await table.update(msg.id, { status: 'processing' });
+                activeUploads.current.delete(tempFileId)
+                return;
+            }
+
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, status: 'processing' as const, file_id: uploadId } : f
@@ -311,6 +371,14 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           onError: async (error) => {
             if (error === 'Canceled' || controller.signal.aborted) return
             const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
+            if (!msg) return;
+
+            if (msg.type === 'voice_recording') {
+                await table.update(msg.id, { status: 'failed' });
+                activeUploads.current.delete(tempFileId)
+                return;
+            }
+
             if (msg && msg.files) {
               const updatedFiles = msg.files.map((f: MediaFile) =>
                 f.file_id === tempFileId ? { ...f, status: 'failed' as const } : f
@@ -318,6 +386,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
 
               await table.update(msg.id, {
                 files: updatedFiles,
+                status: 'failed',
               })
             }
             activeUploads.current.delete(tempFileId)
@@ -334,23 +403,34 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
   }, [])
 
   const cancelUpload = useCallback(async (fileId: string, messageId: string, chatType: 'directmessage' | 'group_chat') => {
-    const controller = activeUploads.current.get(fileId)
+    // If no fileId passed, it might be a voice message where fileId is stored on the record
+    let targetFileId = fileId
+    const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats
+    const msg = await table.get(messageId)
+    
+    if (!targetFileId && msg?.type === 'voice_recording') {
+      targetFileId = msg.voice_message_file_id || ''
+    }
+
+    const controller = activeUploads.current.get(targetFileId)
     if (controller) {
       controller.abort()
-      activeUploads.current.delete(fileId)
+      activeUploads.current.delete(targetFileId)
     }
 
     // Update status in IndexedDB
-    const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats
-    const msg = await table.get(messageId)
-    if (msg && msg.files) {
-      const updatedFiles = msg.files.map((f: MediaFile) =>
-        f.file_id === fileId ? { ...f, status: 'failed' as const } : f
-      )
+    if (msg) {
+      if (msg.type === 'voice_recording') {
+        await table.update(messageId, { status: 'failed' })
+      } else if (msg.files) {
+        const updatedFiles = msg.files.map((f: MediaFile) =>
+          f.file_id === fileId ? { ...f, status: 'failed' as const } : f
+        )
 
-      await table.update(messageId, {
-        files: updatedFiles,
-      })
+        await table.update(messageId, {
+          files: updatedFiles,
+        })
+      }
     }
   }, [])
 
@@ -359,10 +439,57 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     activeUploads.current.clear()
   }, [])
 
-  const retryUpload = useCallback(async (file: MediaFile, messageId: string, chatType: 'directmessage' | 'group_chat') => {
+  const retryUpload = useCallback(async (file_or_null: MediaFile | null, messageId: string, chatType: 'directmessage' | 'group_chat') => {
     const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats
     const msg = await table.get(messageId)
     if (!msg) return
+
+    // Handle Voice Recording Retry
+    if (msg.type === 'voice_recording') {
+      if (!msg.voice_message_blob) return
+      
+      const tempFileId = `vretry-${Date.now()}`
+      const controller = new AbortController()
+      activeUploads.current.set(tempFileId, controller)
+      
+      await table.update(messageId, { 
+        status: 'uploading', 
+        voice_message_file_id: tempFileId 
+      })
+
+      try {
+        await uploadMedia({
+          file: msg.voice_message_blob,
+          name: `voice-${Date.now()}.webm`,
+          mimeType: msg.voice_message_blob.type,
+          mediaType: 'voice_recording',
+          context: {
+            chat_type: chatType,
+            context_id: chatType === 'directmessage' ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id,
+            client_msg_id: msg.client_msg_id,
+            duration: msg.voice_message_duration
+          },
+          signal: controller.signal,
+          onProgress: async () => {
+             // No progress needed for simple voice records currently
+          },
+          onComplete: async (uploadId) => {
+            await table.update(messageId, { status: 'processing', id: uploadId || messageId })
+            activeUploads.current.delete(tempFileId)
+          },
+          onError: async () => {
+             await table.update(messageId, { status: 'failed' })
+             activeUploads.current.delete(tempFileId)
+          }
+        })
+      } catch (err) {
+        console.error('Voice retry error:', err)
+      }
+      return
+    }
+
+    const file = file_or_null as MediaFile
+    if (!file) return
 
     // Receiver-only path: If no blob exists, but we have URLs, just restore visibility
     if (!file.file_blob) {

@@ -1,26 +1,44 @@
 import React, { useState, useRef, useEffect, memo } from 'react'
-import { Play, Pause, Loader2, AlertCircle, Headphones } from 'lucide-react'
+import { Play, Pause, Loader2, AlertCircle, Headphones, X, Download } from 'lucide-react'
 import { MediaFile } from '@/types/mediaTypes'
 import { cn } from '@/lib/utils'
 
 interface AudioMessageProps {
   file: MediaFile
   onRetry?: () => void
+  onCancel?: () => void
   timestamp?: string
   isMine?: boolean
   receipt?: React.ReactNode
 }
 
 function formatDuration(seconds: number = 0) {
-  const m = Math.floor(seconds / 60)
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMessageProps) {
+function parseDurationHMS(hms?: string | number): number {
+  if (!hms) return 0
+  if (typeof hms === 'number') return hms
+  const parts = hms.split(':').map(Number)
+  if (parts.length === 3) {
+    return (parts[0] * 3600) + (parts[1] * 60) + parts[2]
+  }
+  if (parts.length === 2) {
+    return (parts[0] * 60) + parts[1]
+  }
+  return parts[0] || 0
+}
+
+function AudioMessageComp({ file, onRetry, onCancel, timestamp, isMine, receipt }: AudioMessageProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(file.duration || 0)
+  const [duration, setDuration] = useState(() => parseDurationHMS(file.duration))
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const isReady = file.status === 'ready'
@@ -31,7 +49,10 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
 
   useEffect(() => {
     if (audioUrl) {
-      const audio = new Audio(audioUrl)
+      const audio = new Audio()
+      audio.crossOrigin = 'anonymous'
+      audio.preload = 'auto'
+      audio.src = audioUrl
       audioRef.current = audio
 
       const handleLoadedMetadata = () => {
@@ -56,16 +77,56 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
     }
   }, [audioUrl, file.file_id, file.duration])
 
-  const togglePlay = (e: React.MouseEvent) => {
+  const togglePlay = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!audioRef.current || !isReady) return
+    const audio = audioRef.current
+    if (!audio || !isReady || !audioUrl) return
 
     if (isPlaying) {
-      audioRef.current.pause()
+      audio.pause()
       setIsPlaying(false)
     } else {
-      audioRef.current.play().catch(console.error)
-      setIsPlaying(true)
+      try {
+        // Ensure the src is set and loaded
+        if (!audio.src || !audio.src.includes(audioUrl)) {
+          audio.src = audioUrl
+          audio.load()
+        }
+
+        // If the audio source failed before or is not loaded, try to load it
+        if (audio.readyState === 0 || audio.error) {
+          audio.load()
+        }
+
+        // Wait for it to be playable if not already (HAVE_CURRENT_DATA)
+        if (audio.readyState < 2) { 
+          await new Promise((resolve) => {
+            const onCanPlay = () => {
+              audio.removeEventListener('canplay', onCanPlay)
+              audio.removeEventListener('error', onError)
+              resolve(true)
+            }
+            const onError = () => {
+              audio.removeEventListener('canplay', onCanPlay)
+              audio.removeEventListener('error', onError)
+              resolve(false)
+            }
+            audio.addEventListener('canplay', onCanPlay)
+            audio.addEventListener('error', onError)
+            setTimeout(resolve, 3500)
+          })
+        }
+
+        if (audio.error) {
+            throw new Error(`Browser rejected the audio source: ${audio.error.message || 'Unknown error'}`)
+        }
+
+        await audio.play()
+        setIsPlaying(true)
+      } catch (err) {
+        console.error("Playback failed:", err)
+        setIsPlaying(false)
+      }
     }
   }
 
@@ -110,17 +171,35 @@ function AudioMessageComp({ file, onRetry, timestamp, isMine, receipt }: AudioMe
         <div className="flex items-center gap-3">
           {/* 2. Play/Pause Button */}
           <button
-            disabled={!isReady}
-            onClick={togglePlay}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isUploading) {
+                onCancel?.();
+              } else if (!isReady) {
+                onRetry?.();
+              } else {
+                togglePlay(e as any);
+              }
+            }}
             className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center transition-colors",
-              isReady ? "text-[#54656f]" : "text-gray-400"
+              "flex h-8 w-8 shrink-0 items-center justify-center transition-colors cursor-pointer group/cancel",
+              isReady ? "text-[#54656f]" : "text-[#54656f] hover:text-[#111b21]"
             )}
           >
-            {isPlaying ? (
+            {isUploading ? (
+              <div className="relative flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-[#00a884]" strokeWidth={2.5} />
+                <X className="absolute h-3 w-3 text-[#54656f] opacity-0 group-hover/cancel:opacity-100 transition-opacity" strokeWidth={3} />
+                <Headphones className="absolute h-3 w-3 text-[#54656f] group-hover/cancel:opacity-0 transition-opacity" />
+              </div>
+            ) : !isReady ? (
+              <div className="flex items-center justify-center rounded-full bg-[#f8f9fa] border border-[#e9edef] p-1 shadow-sm hover:scale-105 transition-transform">
+                <Download className="h-5 w-5 text-[#00a884]" />
+              </div>
+            ) : isPlaying ? (
               <Pause className="h-6 w-6 fill-current" />
             ) : (
-              <Play className="h-6 w-6 fill-current" />
+              <Play className="h-6 w-6 fill-current ml-0.5" />
             )}
           </button>
 

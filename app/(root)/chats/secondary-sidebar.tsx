@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/tooltip";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn, humanizeDate } from "@/lib/utils";
+import { cn, humanizeDate, formatDuration } from "@/lib/utils";
 import { Button } from "../../../components/ui/button";
 import {
   Avatar,
@@ -496,6 +496,9 @@ export const SecondarySidebar = () => {
                                     const type = obj.recent_message_type;
                                     const isMine = currentUser?.id === obj.recent_user_id;
 
+                                    const voiceMessage = chat.direct_message?.recent_voice_message || chat.group_chat?.recent_voice_message;
+                                    const voiceDuration = chat.direct_message?.recent_voice_message_duration || chat.group_chat?.recent_voice_message_duration;
+
                                     // Receipt logic
                                     const renderReceipt = () => {
                                       if (!isMine) return null;
@@ -514,6 +517,22 @@ export const SecondarySidebar = () => {
                                     };
 
                                     const senderPrefix = !isMine && chat.group_chat?.recent_user_display_name ? <span>{chat.group_chat.recent_user_display_name}:{" "}</span> : isMine && chat.group_chat ? <span>You:{" "}</span> : null;
+
+                                    if (voiceMessage) {
+                                      return (
+                                        <span className="flex items-center gap-0.5 w-full truncate">
+                                          {renderReceipt()}
+                                          {senderPrefix}
+                                          <span className="flex items-center gap-0.5 truncate text-muted-foreground">
+                                            <Mic size={16} className={cn("shrink-0")} />
+                                            <span className="flex items-center gap-0.5">
+                                              <span className="truncate">Voice message</span>
+                                              {voiceDuration && <span className="shrink-0">({formatDuration(voiceDuration)})</span>}
+                                            </span>
+                                          </span>
+                                        </span>
+                                      );
+                                    }
 
                                     if (files && files.length > 0) {
                                       const lastFile = files[files.length - 1];

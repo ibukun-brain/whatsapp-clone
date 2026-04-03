@@ -54,7 +54,11 @@ function useFileUrl(file: MediaFile | undefined) {
 function ViewerAudioPlayer({ file }: { file: MediaFile }) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(file.duration || 0)
+  const [duration, setDuration] = useState<number>(() => {
+    if (typeof file.duration === 'number') return file.duration;
+    if (typeof file.duration === 'string') return parseFloat(file.duration) || 0;
+    return 0;
+  })
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const audioUrl = useFileUrl(file)

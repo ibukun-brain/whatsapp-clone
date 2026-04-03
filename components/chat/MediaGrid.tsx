@@ -173,12 +173,12 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
             const { time: fileTime } = getDateTimeByTimezone(file.timestamp, userTimezone)
             if (file.type === 'voice_recording') {
               return (
-                <VoiceMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
+                <VoiceMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} onCancel={() => onCancel?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
               )
             }
             return file.type === 'audio' ? (
               <div key={file.file_id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); openViewerHandler(file) }}>
-                <AudioMessage file={file} onRetry={() => onRetry?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
+                <AudioMessage file={file} onRetry={() => onRetry?.(file)} onCancel={() => onCancel?.(file)} timestamp={fileTime} isMine={isMine} receipt={isMine ? receipt : undefined} />
               </div>
             ) : (
               <FileMessage key={file.file_id} file={file} onRetry={() => onRetry?.(file)} />

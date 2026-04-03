@@ -13,6 +13,19 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  experimental: {
+    turbo: {
+      resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs'],
+    },
+  },
+  webpack: (config: any) => {
+    // Fallback for non-Turbopack builds
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+    };
+    return config;
+  },
 };
 
 export default withSerwist(nextConfig);

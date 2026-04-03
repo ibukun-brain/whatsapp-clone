@@ -68,6 +68,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
           controls
           className="h-full w-full object-cover relative z-10"
           poster={file.thumbnail_url || undefined}
+          crossOrigin="anonymous"
         />
       ) : (
         <div className="relative h-full w-full">
@@ -137,7 +138,7 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
 
       {(timestamp || receipt) && (
         <div className={cn(
-          "absolute bottom-1 right-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-20",
+          "absolute bottom-1 right-0 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-white z-20",
           !isReady ? "bg-black/30 backdrop-blur-sm" : "bg-black/10"
         )}>
           <span>{timestamp}</span>

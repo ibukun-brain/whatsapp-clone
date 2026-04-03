@@ -1,4 +1,4 @@
-import { MediaFile, MediaStatus} from "./mediaTypes";
+import { MediaFile, MediaStatus } from "./mediaTypes";
 
 export type User = {
   id: string;
@@ -44,6 +44,12 @@ export type DirectMessage = {
   unread_messages: number;
   last_seen: Date | null;
   is_online?: boolean;
+  name: {
+    contact_name: string,
+    display_name: string
+  }
+  recent_voice_message?: string;
+  recent_voice_message_duration?: string;
 }
 
 export type GroupChat = {
@@ -59,6 +65,8 @@ export type GroupChat = {
   recent_message_type?: string;
   unread_messages: number;
   online_users?: number;
+  recent_voice_message?: string;
+  recent_voice_message_duration?: string;
   // Add other group chat properties as needed
 }
 
@@ -102,7 +110,7 @@ export type Chat = {
 
 type MessageType =
   | "text"
-  | "voice"
+  | "voice_recording"
   | "emoji"
   | "document"
   | "status-reply"
@@ -134,8 +142,12 @@ export type DirectMessageChats = {
   timestamp: Date;
   isOptimistic?: boolean;
   client_msg_id?: string;
-  status?: 'pending' | 'sent' | 'failed' | 'processing'; // Added top-level status
+  status?: 'pending' | 'sent' | 'failed' | 'processing' | 'uploading'; // Added top-level status
   files?: MediaFile[];
+  voice_message?: string;
+  voice_message_duration?: string;
+  voice_message_blob?: Blob;
+  voice_message_file_id?: string;
   uploadStatus?: MediaStatus;
   attachments?: Attachment[];
 }
@@ -171,9 +183,14 @@ export type GroupMessageChats = {
   deleted: boolean;
   timestamp: Date;
   receipt: "sent" | "delivered" | "read" | "failed";
+  status?: 'pending' | 'sent' | 'failed' | 'processing' | 'uploading';
   isOptimistic?: boolean;
   client_msg_id?: string;
   files?: import("./mediaTypes").MediaFile[];
+  voice_message?: string;
+  voice_message_duration?: string;
+  voice_message_blob?: Blob;
+  voice_message_file_id?: string;
   uploadStatus?: import("./mediaTypes").MediaStatus;
   attachments?: Attachment[];
 }

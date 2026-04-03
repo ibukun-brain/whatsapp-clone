@@ -15,16 +15,40 @@ interface VoiceRecorderProps {
     draftMimeType?: string;
 }
 
+const DottedLineStyles = () => (
+    <style>{`
+        @keyframes moveDottedLine {
+            from { background-position: 5px 50%; }
+            to { background-position: 0 50%; }
+        }
+        .dotted-line-base {
+            background-image: linear-gradient(to right, #919ba1 50%, rgba(255, 255, 255, 0) 0%);
+            background-size: 5px 3px;
+            background-repeat: repeat-x;
+            background-position: 0 50%;
+        }
+        .dotted-line-recording {
+            background-image: linear-gradient(to right, #54656f 50%, rgba(255, 255, 255, 0) 0%);
+            opacity: 1;
+        }
+        .dotted-line-animated {
+            animation: moveDottedLine 0.4s linear infinite;
+        }
+    `}</style>
+);
+
 export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDuration, draftMimeType }: VoiceRecorderProps) => {
     const [isPaused, setIsPaused] = useState(!!draftBlob);
     const [isPlaying, setIsPlaying] = useState(false);
     const [duration, setDuration] = useState(draftDuration || 0);
     const [playbackTime, setPlaybackTime] = useState(0);
+    const [smoothProgress, setSmoothProgress] = useState(0);
     const [isDraftMode, setIsDraftMode] = useState(!!draftBlob);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    // If resuming from a draft, seed audioChunks with the draft blob
-    const audioChunksRef = useRef<Blob[]>(draftBlob ? [draftBlob] : []);
+    const streamRef = useRef<MediaStream | null>(null);
+    const chunksRef = useRef<Blob[]>([]);
+    
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
     const isCancelledRef = useRef(false);
@@ -33,88 +57,126 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         draftBlob ? URL.createObjectURL(draftBlob) : null
     );
     const durationRef = useRef(draftDuration || 0);
-    const mimeTypeRef = useRef(draftMimeType || '');
+
+    // Get the most compatible MIME type for the browser
+    const getMimeType = () => {
+        const types = [
+            'audio/webm; codecs=opus',
+            'audio/webm',
+            'audio/ogg; codecs=opus',
+            'audio/mp4; codecs=opus',
+            'audio/aac',
+        ];
+        return types.find(t => MediaRecorder.isTypeSupported(t)) || 'audio/wav';
+    };
+
+    // Smooth playhead animation loop
+    useEffect(() => {
+        let rafId: number;
+
+        const updateProgress = () => {
+            if (audioPlayerRef.current && isPlaying) {
+                const duration = audioPlayerRef.current.duration;
+                if (duration && isFinite(duration)) {
+                    const progress = (audioPlayerRef.current.currentTime / duration) * 100;
+                    setSmoothProgress(progress);
+                }
+                rafId = requestAnimationFrame(updateProgress);
+            }
+        };
+
+        if (isPlaying) {
+            rafId = requestAnimationFrame(updateProgress);
+        } else {
+            if (audioPlayerRef.current) {
+                const duration = audioPlayerRef.current.duration;
+                if (duration && isFinite(duration)) {
+                    setSmoothProgress((playbackTime / duration) * 100);
+                } else {
+                    setSmoothProgress(0);
+                }
+            }
+        }
+
+        return () => cancelAnimationFrame(rafId);
+    }, [isPlaying, playbackTime]);
 
     useEffect(() => {
         if (!draftBlob) {
             startRecording();
         }
-        return () => {
-            // On unmount: if not cancelled and not sent, save as draft
-            if (!isCancelledRef.current && !isSentRef.current && audioChunksRef.current.length > 0) {
-                const mime = mimeTypeRef.current;
-                const blob = new Blob(audioChunksRef.current, { type: mime });
-                onDraft?.(blob, durationRef.current, mime);
-            }
 
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-                // Prevent the onstop from firing onStop callback
-                mediaRecorderRef.current.onstop = () => {
-                    mediaRecorderRef.current?.stream?.getTracks().forEach(track => track.stop());
-                };
-                mediaRecorderRef.current.stop();
+        return () => {
+            if (!isCancelledRef.current && !isSentRef.current) {
+                if (chunksRef.current.length > 0) {
+                    const draftBlobToSave = new Blob(chunksRef.current, { type: getMimeType() });
+                    onDraft?.(draftBlobToSave, durationRef.current, getMimeType());
+                } else if (draftBlob) {
+                    onDraft?.(draftBlob, durationRef.current, draftMimeType || getMimeType());
+                }
             }
-            if (timerRef.current) clearInterval(timerRef.current);
+            cleanup();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    /** Start a fresh recording session. If `appendToDraft` is true, keeps existing
-     *  chunks (from a restored draft) so the final file includes both old + new audio. */
-    const startRecording = async (appendToDraft = false) => {
+    const cleanup = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (timerRef.current) clearInterval(timerRef.current);
+        // Do not clear chunksRef here as finalizeRecording needs it
+    };
+
+    const isStartingRef = useRef(false);
+
+    const startRecording = async () => {
+        // Prevent accidental double-start from React StrictMode or rapid clicks
+        if (isStartingRef.current || (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive')) {
+            return;
+        }
+        
+        isStartingRef.current = true;
+        
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = stream;
 
-            // Prefer audio/ogg with opus codec, fallback to audio/webm with opus
-            let mimeType: string;
-            if (MediaRecorder.isTypeSupported('audio/ogg; codecs=opus')) {
-                mimeType = 'audio/ogg; codecs=opus';
-            } else if (MediaRecorder.isTypeSupported('audio/webm; codecs=opus')) {
-                mimeType = 'audio/webm; codecs=opus';
-            } else {
-                mimeType = 'audio/webm';
-            }
-            mimeTypeRef.current = mimeType;
-
+            const mimeType = getMimeType();
             const recorder = new MediaRecorder(stream, { mimeType });
             mediaRecorderRef.current = recorder;
 
-            if (!appendToDraft) {
-                // Fresh recording — clear chunks
-                audioChunksRef.current = [];
-                isCancelledRef.current = false;
-                isSentRef.current = false;
+            // If we're not resuming from a draft, ensure chunks are cleared
+            if (chunksRef.current.length === 0 || !isDraftMode) {
+                // Keep draft if resuming, otherwise clear
+                if (!isDraftMode || chunksRef.current.length === 0) {
+                   chunksRef.current = [];
+                }
             }
-            // If appending, keep existing chunks (draft blob) and just add new ones
 
             recorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
-                    audioChunksRef.current.push(e.data);
+                    chunksRef.current.push(e.data);
                 }
             };
 
-            recorder.onstop = () => {
-                if (audioUrl) URL.revokeObjectURL(audioUrl);
-                const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-                if (!isCancelledRef.current && isSentRef.current && audioChunksRef.current.length > 0) {
-                    const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
-                    const file = new File([audioBlob], `voice-${Date.now()}.${ext}`, { type: mimeType });
-                    onStop(file, durationRef.current);
-                }
-                stream.getTracks().forEach(track => track.stop());
-            };
+            recorder.start(); 
+            
+            isCancelledRef.current = false;
+            isSentRef.current = false;
+            setIsDraftMode(false);
 
-            recorder.start(100);
-
-            if (!appendToDraft) {
-                setDuration(0);
-                durationRef.current = 0;
-            }
-            // When appending, duration continues from where it left off
             startTimer();
         } catch (err) {
-            console.error("Error accessing microphone:", err);
+            console.error("Recording failed:", err);
             toast.error("Could not access microphone");
-            if (!appendToDraft) onCancel();
+            onCancel();
+        } finally {
+            isStartingRef.current = false;
         }
     };
 
@@ -133,68 +195,73 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         if (timerRef.current) clearInterval(timerRef.current);
     };
 
-    /** Send the final recording (all chunks merged). */
     const handleStop = () => {
         isCancelledRef.current = false;
         isSentRef.current = true;
 
-        if (isDraftMode) {
-            // Sending from pure draft mode (user never resumed recording)
-            // Build file from whatever chunks we have (draft blob)
-            const mime = mimeTypeRef.current || draftMimeType || 'audio/ogg';
-            const ext = mime.includes('ogg') ? 'ogg' : 'webm';
-            const audioBlob = new Blob(audioChunksRef.current, { type: mime });
-            const file = new File([audioBlob], `voice-${Date.now()}.${ext}`, { type: mime });
-            onStop(file, durationRef.current);
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.onstop = () => {
+                finalizeRecording();
+            };
+            mediaRecorderRef.current.stop();
         } else {
-            // Active or resumed recording — stop the MediaRecorder, which triggers onstop → onStop
-            mediaRecorderRef.current?.stop();
+            finalizeRecording();
         }
-        stopTimer();
+    };
+
+    const finalizeRecording = () => {
+        const mimeType = getMimeType();
+        const extension = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'm4a';
+        
+        if (chunksRef.current.length > 0) {
+            const finalBlob = new Blob(chunksRef.current, { type: mimeType });
+            if (finalBlob.size > 0) {
+                const file = new File([finalBlob], `voice-${Date.now()}.${extension}`, { type: mimeType });
+                onStop(file, durationRef.current);
+            }
+        }
+        chunksRef.current = []; // Clear for next time
+        cleanup();
     };
 
     const handleCancel = () => {
         isCancelledRef.current = true;
         isSentRef.current = false;
-
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-            mediaRecorderRef.current.stop();
-        }
-        stopTimer();
+        chunksRef.current = []; // Clear current buffer
+        cleanup();
         onCancel();
     };
 
-    /** Toggle pause/resume during an active recording session. */
     const togglePause = () => {
-        if (!mediaRecorderRef.current) return;
-
         if (isPaused) {
-            // Resume recording
+            setIsPaused(false);
             if (isPlaying) {
                 audioPlayerRef.current?.pause();
                 setIsPlaying(false);
             }
-            mediaRecorderRef.current.resume();
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+                mediaRecorderRef.current.resume();
+            }
             startTimer();
-            setIsPaused(false);
         } else {
-            // Pause recording
-            mediaRecorderRef.current.pause();
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.pause();
+                mediaRecorderRef.current.requestData(); // Flush the current chunk to chunksRef
+                
+                const previewBlob = new Blob(chunksRef.current, { type: getMimeType() });
+                const url = URL.createObjectURL(previewBlob);
+                setAudioUrl(prev => {
+                    if (prev && !prev.startsWith('blob:')) return prev;
+                    if (prev) URL.revokeObjectURL(prev);
+                    return url;
+                });
+            }
             stopTimer();
             setIsPaused(true);
-
-            // Generate a preview URL for playback
-            const mimeType = mediaRecorderRef.current.mimeType;
-            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-            const url = URL.createObjectURL(audioBlob);
-            setAudioUrl(url);
         }
     };
 
-    /** Resume recording from a draft — starts a new MediaRecorder session that
-     *  appends to the existing draft blob. */
     const resumeFromDraft = async () => {
-        // Stop any playback
         if (isPlaying) {
             audioPlayerRef.current?.pause();
             setIsPlaying(false);
@@ -202,19 +269,53 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
 
         setIsDraftMode(false);
         setIsPaused(false);
-        // Duration continues from draft duration (already set)
-        await startRecording(true);
+        
+        if (draftBlob) {
+            chunksRef.current = [draftBlob]; 
+        }
+        
+        await startRecording();
     };
 
-    const handlePlayPausePlayback = () => {
-        if (!audioPlayerRef.current) return;
+    const handlePlayPausePlayback = async () => {
+        if (!audioPlayerRef.current || !audioUrl) return;
+
+        const audio = audioPlayerRef.current;
 
         if (isPlaying) {
-            audioPlayerRef.current.pause();
+            audio.pause();
             setIsPlaying(false);
         } else {
-            audioPlayerRef.current.play();
-            setIsPlaying(true);
+            try {
+                if (audio.currentTime >= (audio.duration - 0.1)) {
+                    audio.currentTime = 0;
+                    setPlaybackTime(0);
+                }
+
+                if (!audio.src || !audio.src.includes(audioUrl)) {
+                    audio.src = audioUrl;
+                    audio.load();
+                }
+
+                if (audio.readyState === 0 || audio.error) {
+                    audio.load();
+                }
+
+                if (audio.readyState < 2) {
+                    await new Promise((resolve) => {
+                        const onCanPlay = () => { resolve(true); audio.removeEventListener('canplay', onCanPlay); };
+                        audio.addEventListener('canplay', onCanPlay);
+                        setTimeout(resolve, 3000);
+                    });
+                }
+
+                await audio.play();
+                setIsPlaying(true);
+            } catch (error) {
+                console.error("Playback error:", error);
+                setIsPlaying(false);
+                toast.error("Playback failed.");
+            }
         }
     };
 
@@ -226,16 +327,24 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
 
     return (
         <div className="flex items-center flex-1 px-4 justify-end animate-in slide-in-from-right-2 duration-200">
+            <DottedLineStyles />
             <audio
                 ref={audioPlayerRef}
                 src={audioUrl || undefined}
-                onEnded={() => setIsPlaying(false)}
+                preload="auto"
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => {
+                    setIsPlaying(false);
+                    if (audioPlayerRef.current) {
+                        setPlaybackTime(audioPlayerRef.current.duration);
+                    }
+                }}
                 onTimeUpdate={() => setPlaybackTime(audioPlayerRef.current?.currentTime || 0)}
                 className="hidden"
             />
 
             <div className="flex items-center gap-4 md:w-80 lg:w-120">
-                {/* Trash Icon (Outline) */}
                 <button
                     onClick={handleCancel}
                     className="-mt-1.5 text-[#54656f] hover:text-[#111b21] transition-colors cursor-pointer shrink-0"
@@ -244,65 +353,44 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
                     <Trash2 size={22} strokeWidth={1.5} />
                 </button>
 
-                {/* Play/Pause Button */}
                 <div className="shrink-0 ml-2">
                     {isPaused || isDraftMode ? (
                         <button
                             onClick={handlePlayPausePlayback}
-                            className="text-[#54656f] hover:text-[#111b21] transition-colors cursor-pointer"
+                            className="text-[#54656f] hover:text-[#111b21] transition-colors cursor-pointer mt-1"
                         >
                             {isPlaying ? <Pause size={22} fill="currentColor" stroke="none" /> : <Play size={22} fill="currentColor" stroke="none" />}
                         </button>
                     ) : (
-                        <button
-                            onClick={togglePause}
-                            className="text-[#54656f] hover:text-[#111b21] transition-colors cursor-pointer"
-                        >
-                            <Pause size={22} fill="currentColor" stroke="none" />
-                        </button>
+                        <div className="bg-[#ea0038] w-2.5 h-2.5 rounded-lg" />
                     )}
                 </div>
 
-                {/* Waveform/Dotted Line Area */}
                 <div className="flex-1 flex items-center gap-3 min-w-0">
                     <div className="flex-1 relative h-6 flex items-center">
-                        {/* Dotted Line */}
-                        <div className="w-full border-t-[3px] border-dotted border-[#919ba1] opacity-50" />
-
-                        {/* Playhead/End Dot */}
+                        <div className={`w-full h-[3px] dotted-line-base ${!isPaused && !isDraftMode ? 'dotted-line-recording dotted-line-animated' : 'opacity-50'}`} />
                         <div
-                            className="absolute bg-[#00a884] w-2.5 h-2.5 rounded-full"
+                            className={`absolute bg-[#00a884] w-2.5 h-2.5 rounded-full pointer-events-none ${(!isPaused && !isDraftMode) ? 'invisible' : ''}`}
                             style={{
-                                left: (isPaused || isDraftMode) && isPlaying && audioPlayerRef.current
-                                    ? `${(playbackTime / audioPlayerRef.current.duration) * 100}%`
-                                    : '100%'
+                                top: '50%',
+                                left: (isPaused || isDraftMode) ? `${smoothProgress}%` : '100%',
+                                transform: `translate(-${(isPaused || isDraftMode) ? smoothProgress : 100}%, -50%)`
                             }}
                         />
                     </div>
                 </div>
 
-                {/* Info & Send Area */}
                 <div className="flex items-center gap-4 shrink-0">
                     <span className="text-[15px] text-[#54656f] font-normal min-w-[32px]">
                         {formatTime((isPaused || isDraftMode) && isPlaying ? playbackTime : duration)}
                     </span>
 
-                    {/* Mic / Pause indicator:
-                        - Draft mode: mic to resume recording
-                        - Active recording: pulsing pause (red) / mic (red) to toggle */}
                     {isDraftMode ? (
-                        <div
-                            className="cursor-pointer"
-                            onClick={resumeFromDraft}
-                            title="Continue recording"
-                        >
+                        <div className="cursor-pointer" onClick={resumeFromDraft} title="Continue recording">
                             <Mic size={22} className="text-[#ea0038]" />
                         </div>
                     ) : (
-                        <div
-                            className={`cursor-pointer ${!isPaused ? "animate-pulse" : ""}`}
-                            onClick={togglePause}
-                        >
+                        <div className={`cursor-pointer ${!isPaused ? "animate-pulse" : ""}`} onClick={togglePause}>
                             {!isPaused ? (
                                 <Pause size={22} className="text-[#ea0038]" fill="currentColor" stroke="none" />
                             ) : (
@@ -311,7 +399,6 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
                         </div>
                     )}
 
-                    {/* Send Button */}
                     <button
                         onClick={handleStop}
                         className="w-11 h-11 rounded-full bg-[#00a884] flex items-center justify-center text-white hover:bg-[#008f72] transition-all shadow-sm cursor-pointer ml-1"
