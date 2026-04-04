@@ -134,7 +134,7 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
 
     const isStartingRef = useRef(false);
 
-    const startRecording = async () => {
+    const startRecording = async (isResuming = false) => {
         // Prevent accidental double-start from React StrictMode or rapid clicks
         if (isStartingRef.current || (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive')) {
             return;
@@ -150,17 +150,25 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
             const recorder = new MediaRecorder(stream, { mimeType });
             mediaRecorderRef.current = recorder;
 
-            // If we're not resuming from a draft, ensure chunks are cleared
-            if (chunksRef.current.length === 0 || !isDraftMode) {
-                // Keep draft if resuming, otherwise clear
-                if (!isDraftMode || chunksRef.current.length === 0) {
-                   chunksRef.current = [];
-                }
+            // Only clear chunks if we're starting a completely new recording
+            if (!isResuming && !isDraftMode && chunksRef.current.length === 0) {
+                chunksRef.current = [];
             }
 
             recorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
                     chunksRef.current.push(e.data);
+                    
+                    // If we requested data for a preview (e.g. during pause)
+                    if (isWaitingForPreviewRef.current) {
+                        isWaitingForPreviewRef.current = false;
+                        const previewBlob = new Blob(chunksRef.current, { type: getMimeType() });
+                        const url = URL.createObjectURL(previewBlob);
+                        setAudioUrl(prev => {
+                            if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                            return url;
+                        });
+                    }
                 }
             };
 
@@ -232,6 +240,8 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         onCancel();
     };
 
+    const isWaitingForPreviewRef = useRef(false);
+
     const togglePause = () => {
         if (isPaused) {
             setIsPaused(false);
@@ -239,22 +249,21 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
                 audioPlayerRef.current?.pause();
                 setIsPlaying(false);
             }
+            
+            // Resume the existing recorder if it's just paused
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
                 mediaRecorderRef.current.resume();
+            } else {
+                // Otherwise start a new one (e.g. resuming from draft)
+                startRecording(true);
             }
             startTimer();
         } else {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                // Request data so we can update the preview URL, but keep the session alive
+                isWaitingForPreviewRef.current = true;
+                mediaRecorderRef.current.requestData();
                 mediaRecorderRef.current.pause();
-                mediaRecorderRef.current.requestData(); // Flush the current chunk to chunksRef
-                
-                const previewBlob = new Blob(chunksRef.current, { type: getMimeType() });
-                const url = URL.createObjectURL(previewBlob);
-                setAudioUrl(prev => {
-                    if (prev && !prev.startsWith('blob:')) return prev;
-                    if (prev) URL.revokeObjectURL(prev);
-                    return url;
-                });
             }
             stopTimer();
             setIsPaused(true);
@@ -270,11 +279,11 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         setIsDraftMode(false);
         setIsPaused(false);
         
-        if (draftBlob) {
+        if (draftBlob && chunksRef.current.length === 0) {
             chunksRef.current = [draftBlob]; 
         }
         
-        await startRecording();
+        await startRecording(true);
     };
 
     const handlePlayPausePlayback = async () => {

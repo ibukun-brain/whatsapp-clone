@@ -103,7 +103,7 @@ function VoiceMessageComp({
   const audioUrl = voice_message || file?.media_url || file?.preview_url
 
   // Generate a stable waveform based on file_id or voice_message URL
-  const waveformBars = useMemo(() => generateWaveform(file?.file_id || voice_message || 'default', 44), [file?.file_id, voice_message])
+  const waveformBars = useMemo(() => generateWaveform(file?.file_id || voice_message || 'default', 42), [file?.file_id, voice_message])
 
   // Removed the complex useEffect that was recreating the audio object on every duration update
 
@@ -213,7 +213,6 @@ function VoiceMessageComp({
     audioRef.current.currentTime = time
     setCurrentTime(time)
   }
-
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
@@ -224,6 +223,7 @@ function VoiceMessageComp({
       {audioUrl && isReady && (
         <audio
           ref={audioRef}
+          src={audioUrl}
           preload="auto"
           loop={false}
           playsInline
@@ -236,14 +236,16 @@ function VoiceMessageComp({
           onEnded={() => {
             setIsPlaying(false);
             setCurrentTime(0);
+            if (audioRef.current) {
+              audioRef.current.currentTime = 0;
+            }
           }}
           onTimeUpdate={(e) => {
-            // Backup sync if requestAnimationFrame lags
-            if (!isPlaying) setCurrentTime(e.currentTarget.currentTime);
+            if (!isPlaying && e.currentTarget.currentTime !== currentTime) {
+              setCurrentTime(e.currentTarget.currentTime);
+            }
           }}
-        >
-          <source src={audioUrl} type={file?.mime_type || (audioUrl.includes('.webm') ? 'audio/webm' : audioUrl.includes('.mp4') ? 'audio/mp4' : 'audio/ogg')} />
-        </audio>
+        />
       )}
       {/* Play/Pause Button with Avatar */}
       <div className="absolute right-4 top-2 shrink-0">
