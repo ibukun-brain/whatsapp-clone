@@ -81,6 +81,7 @@ const MessageBubble = ({
     isConsecutive = false,
     onShowInfo,
     onRetryMessage,
+    onPlayNext,
     allVisualMedia = []
 }: {
     msg: DirectMessageChats | GroupMessageChats,
@@ -89,6 +90,7 @@ const MessageBubble = ({
     isConsecutive?: boolean,
     onShowInfo?: (msg: GroupMessageChats) => void,
     onRetryMessage?: (msg: DirectMessageChats | GroupMessageChats) => void,
+    onPlayNext?: (msgId: string) => void,
     allVisualMedia?: MediaFile[]
 }) => {
     const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
@@ -251,6 +253,7 @@ const MessageBubble = ({
                                 {msg.voice_message && (
                                     <div className="mb-1">
                                         <VoiceMessage 
+                                            id={msg.id}
                                             voice_message={msg.voice_message}
                                             voice_message_duration={msg.voice_message_duration}
                                             status={msg.status}
@@ -258,6 +261,7 @@ const MessageBubble = ({
                                             timestamp={time}
                                             onRetry={() => retryUpload(null, msg.id, isDM ? 'directmessage' : 'group_chat')}
                                             onCancel={() => cancelUpload('', msg.id, isDM ? 'directmessage' : 'group_chat')}
+                                            onPlayNext={() => onPlayNext?.(msg.id)}
                                             receipt={isMine ? <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : undefined}
                                             chatId={chatId}
                                             isDM={isDM}
@@ -336,11 +340,13 @@ const MessageBubble = ({
                                 {msg.voice_message && (
                                     <div className="mb-1 px-1">
                                         <VoiceMessage 
+                                            id={msg.id}
                                             voice_message={msg.voice_message}
                                             voice_message_duration={msg.voice_message_duration}
                                             status={msg.status}
                                             isMine={isMine}
                                             timestamp={time}
+                                            onPlayNext={() => onPlayNext?.(msg.id)}
                                             receipt={isMine ? <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} /> : undefined}
                                             senderName={isMine ? currentUser.display_name : (msg.user as User)?.display_name}
                                             senderAvatar={isMine ? currentUser.profile_pic : (msg.user as User)?.profile_pic}

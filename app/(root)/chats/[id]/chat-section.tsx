@@ -22,6 +22,7 @@ import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
 import { useTypingStore, EMPTY_TYPING } from "@/lib/stores/typing-store";
 import { useGlobalWsStore } from "@/lib/stores/global-ws-store";
+import { useVoicePlaybackStore } from "@/lib/stores/voice-playback-store";
 import { useScrollManager } from "@/hooks/use-scroll-manager";
 import { CheckIcon2 as CheckIcon2_ } from "@/components/icons/chats-icon";
 import { useUnreadMessages } from "@/hooks/use-unread-messages";
@@ -292,6 +293,20 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             .flatMap(m => m.files || [])
             .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
     }, [processedDirectMessages, processedGroupMessages, chatType]);
+
+    const setActiveAudioId = useVoicePlaybackStore((s) => s.setActiveAudioId);
+
+    const handlePlayNext = useCallback((currentMsgId: string) => {
+        const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+        const currentIndex = messages.findIndex(m => m.id === currentMsgId);
+        if (currentIndex === -1) return;
+
+        // Find the next voice message
+        const nextVoiceMsg = messages.slice(currentIndex + 1).find(m => m.voice_message);
+        if (nextVoiceMsg) {
+            setActiveAudioId(nextVoiceMsg.id);
+        }
+    }, [chatType, processedGroupMessages, processedDirectMessages, setActiveAudioId]);
 
     // ── Scroll Manager Hook ──────────────────────────────────────────
     const messagesLength = chatType === "groupchat"
@@ -683,6 +698,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom]);
 
     const handleVoiceDraft = useCallback((blob: Blob, duration: number, mimeType: string) => {
+        // Update local state to keep in sync with draft
+        setVoiceDraftBlob(blob);
+        setVoiceDraftDuration(duration);
+        setVoiceDraftMimeType(mimeType);
+
         // Save voice recording as a draft in IndexedDB
         if (chatItemIdRef.current) {
             db.chatlist.update(chatItemIdRef.current, {
@@ -973,6 +993,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                     isDM={true}
                                                     isConsecutive={isConsecutive}
                                                     onShowInfo={setMessageInfoMsg}
+                                                    onPlayNext={handlePlayNext}
                                                     allVisualMedia={allVisualMedia}
                                                 />
                                             </React.Fragment>
@@ -1004,6 +1025,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                     isDM={false}
                                                     isConsecutive={isConsecutive}
                                                     onShowInfo={setMessageInfoMsg}
+                                                    onPlayNext={handlePlayNext}
                                                     allVisualMedia={allVisualMedia}
                                                 />
                                             </React.Fragment>

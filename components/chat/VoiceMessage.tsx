@@ -8,13 +8,17 @@ import { useUserStore } from '@/lib/providers/user-store-provider'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { toast } from "sonner"
 
+import { useVoicePlaybackStore } from '@/lib/stores/voice-playback-store'
+
 interface VoiceMessageProps {
+  id?: string
   file?: MediaFile
   voice_message?: string
   voice_message_duration?: string
   status?: string
   onRetry?: () => void
   onCancel?: () => void
+  onPlayNext?: () => void
   timestamp?: string
   isMine?: boolean
   receipt?: React.ReactNode
@@ -58,12 +62,14 @@ function generateWaveform(seed: string, bars: number = 42): number[] {
 }
 
 function VoiceMessageComp({
+  id,
   file,
   voice_message,
   voice_message_duration,
   status,
   onRetry,
   onCancel,
+  onPlayNext,
   timestamp,
   isMine,
   receipt,
@@ -73,6 +79,8 @@ function VoiceMessageComp({
   senderName: propSenderName
 }: VoiceMessageProps) {
   const currentUser = useUserStore((state) => state.user)
+  const activeAudioId = useVoicePlaybackStore((s) => s.activeAudioId)
+  const setActiveAudioId = useVoicePlaybackStore((s) => s.setActiveAudioId)
 
   // Fetch chat info for fallback naming/avatar specifically for DMs
   const chatInfo = useLiveQuery(async () => {
@@ -92,7 +100,7 @@ function VoiceMessageComp({
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(() => parseDurationHMS(voice_message_duration || file?.duration))
+  const [duration, setDuration] = useState(() => parseDurationHMS(voice_message_duration))
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const animationFrameRef = useRef<number | null>(null)
 
@@ -105,7 +113,27 @@ function VoiceMessageComp({
   // Generate a stable waveform based on file_id or voice_message URL
   const waveformBars = useMemo(() => generateWaveform(file?.file_id || voice_message || 'default', 42), [file?.file_id, voice_message])
 
-  // Removed the complex useEffect that was recreating the audio object on every duration update
+  // Synchronize playback state with global store
+  useEffect(() => {
+    if (activeAudioId && activeAudioId !== id) {
+      if (isPlaying) {
+        audioRef.current?.pause();
+        setIsPlaying(false);
+      }
+    } else if (activeAudioId === id) {
+      if (!isPlaying && audioRef.current && isReady) {
+        const playAudio = async () => {
+          try {
+            await audioRef.current?.play();
+            setIsPlaying(true);
+          } catch (e) {
+            console.error("Auto-play failed:", e);
+          }
+        };
+        playAudio();
+      }
+    }
+  }, [activeAudioId, id, isReady]);
 
   // Use requestAnimationFrame for smooth waveform playback animation
   useEffect(() => {
@@ -135,8 +163,12 @@ function VoiceMessageComp({
     if (isPlaying) {
       audio.pause()
       setIsPlaying(false)
+      if (activeAudioId === id) {
+        setActiveAudioId(null)
+      }
     } else {
       try {
+        setActiveAudioId(id || null)
         // Ensure the src is set and loaded
         // Use a more robust check for Blob URLs or different formats
         if (!audio.src || (audio.src !== audioUrl && !audio.src.endsWith(audioUrl))) {
@@ -228,9 +260,11 @@ function VoiceMessageComp({
           loop={false}
           playsInline
           onLoadedMetadata={(e) => {
-            const audio = e.currentTarget;
-            if (isFinite(audio.duration)) {
-              setDuration(audio.duration);
+            const audio = e.target as HTMLAudioElement;
+            const duration = audio.duration;
+            if (isFinite(duration)) {
+              console.log("Audio duration:", duration, e.target);
+              setDuration(duration);
             }
           }}
           onEnded={() => {
@@ -239,6 +273,11 @@ function VoiceMessageComp({
             if (audioRef.current) {
               audioRef.current.currentTime = 0;
             }
+            if (activeAudioId === id) {
+              setActiveAudioId(null);
+            }
+            // Trigger next audio play
+            onPlayNext?.();
           }}
           onTimeUpdate={(e) => {
             if (!isPlaying && e.currentTarget.currentTime !== currentTime) {
@@ -374,6 +413,7 @@ export default memo(VoiceMessageComp, (prev, next) => {
     prev.isMine === next.isMine &&
     prev.receipt === next.receipt &&
     prev.senderAvatar === next.senderAvatar &&
-    prev.senderName === next.senderName
+    prev.senderName === next.senderName &&
+    prev.id === next.id
   )
 })

@@ -162,12 +162,16 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
                     // If we requested data for a preview (e.g. during pause)
                     if (isWaitingForPreviewRef.current) {
                         isWaitingForPreviewRef.current = false;
-                        const previewBlob = new Blob(chunksRef.current, { type: getMimeType() });
+                        const mimeType = getMimeType();
+                        const previewBlob = new Blob(chunksRef.current, { type: mimeType });
                         const url = URL.createObjectURL(previewBlob);
                         setAudioUrl(prev => {
                             if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
                             return url;
                         });
+
+                        // Notify parent so it can keep the draft updated
+                        onDraft?.(previewBlob, durationRef.current, mimeType);
                     }
                 }
             };
