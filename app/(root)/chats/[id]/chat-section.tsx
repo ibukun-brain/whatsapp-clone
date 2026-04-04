@@ -14,7 +14,7 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/indexdb";
-import { formatDatetime, getDateLabel, getDateTimeByTimezone } from "@/lib/utils";
+import { formatDatetime, getDateLabel, getDateTimeByTimezone, formatDuration } from "@/lib/utils";
 import ChatHeader from "./chat-header";
 import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat, GroupMessageChatRecipients, WSData } from "@/types";
 import MessageBubble from "./message-bubble";
@@ -173,11 +173,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [voiceDraftDuration, setVoiceDraftDuration] = React.useState<number>(0);
     const [voiceDraftMimeType, setVoiceDraftMimeType] = React.useState<string>('');
 
-    const formatRecordingTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
-    };
 
     // ── Draft ─────────────────────────────────────────────────────────
     // Debounce ref: saves draft to IndexedDB 400 ms after the user stops typing.
@@ -655,18 +650,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         setIsRecording(true);
     }, []);
 
-    const formatDraftDuration = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
-    };
-
-    const formatDurationHMS = (seconds: number) => {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    };
 
     const handleVoiceRecordingStop = useCallback((file: File, duration: number) => {
         setIsRecording(false);
@@ -681,7 +664,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
             context_id: chatId,
             mediaTypeOverride: 'voice_recording',
-            duration: formatDurationHMS(duration),
+            duration: formatDuration(duration),
         }, {}).then(() => {
             scrollToBottom();
             // Clear voice draft from DB after successful upload
@@ -707,7 +690,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (chatItemIdRef.current) {
             db.chatlist.update(chatItemIdRef.current, {
                 draft: {
-                    text: `🎙 ${formatDraftDuration(duration)}`,
+                    text: `🎙 ${formatDuration(duration)}`,
                     timestamp: new Date(),
                     voiceBlob: blob,
                     voiceDuration: duration,

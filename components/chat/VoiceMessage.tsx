@@ -245,7 +245,7 @@ function VoiceMessageComp({
     audioRef.current.currentTime = time
     setCurrentTime(time)
   }
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
+  const progressPercent = Math.min(100, Math.max(0, duration > 0 ? (currentTime / duration) * 100 : 0))
 
   return (
     <div className={cn(
@@ -262,8 +262,7 @@ function VoiceMessageComp({
           onLoadedMetadata={(e) => {
             const audio = e.target as HTMLAudioElement;
             const duration = audio.duration;
-            if (isFinite(duration)) {
-              console.log("Audio duration:", duration, e.target);
+            if (isFinite(duration) && duration < 0) {
               setDuration(duration);
             }
           }}

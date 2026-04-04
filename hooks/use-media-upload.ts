@@ -4,7 +4,7 @@ import { db } from '@/lib/indexdb'
 import { computeBlurhash } from '@/lib/utils/computeBlurhash'
 import { axiosInstance } from '@/lib/axios'
 import { uploadMedia } from '@/lib/utils/mediaUploader'
-import { getValidFilename } from '@/lib/utils'
+import { getValidFilename, formatDuration } from '@/lib/utils'
 import { getVideoMetadata } from '@/lib/utils/media-utils'
 import { UploadContext, MediaFile, MediaReadyEvent } from '@/types/mediaTypes'
 
@@ -42,12 +42,6 @@ const ARCHIVE_MIMES = new Set([
   'application/x-xz',
 ])
 
-export function formatDurationHMS(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
 
 export function getMediaType(mimeType: string, forceDocument?: boolean): MediaFile['type'] {
   if (!forceDocument) {
@@ -256,7 +250,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           filename: getValidFilename(file.name),
           mime_type: tempFilesMimeType,
           file_size: file.size,
-          duration: context.duration ?? (duration !== undefined ? formatDurationHMS(duration) : undefined),
+          duration: context.duration ?? (duration !== undefined ? formatDuration(duration) : undefined),
           caption: captions?.[index] || context.caption,
           file_blob: file, // Store for retry
           timestamp,
