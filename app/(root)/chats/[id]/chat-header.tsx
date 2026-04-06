@@ -23,12 +23,13 @@ type GroupMessageUserInfo = {
     onlineUsersCount?: number
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping, timezone }: {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping, isRecording, timezone }: {
     directMessageUserInfo: DirectMessageUserInfo | null,
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
     groupMembers?: GroupMember[],
     isTyping?: boolean,
+    isRecording?: boolean,
     timezone?: string,
 }) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
@@ -81,6 +82,17 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                             className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
                                         >
                                             Typing…
+                                        </motion.span>
+                                    ) : isRecording ? (
+                                        <motion.span
+                                            key="recording"
+                                            initial={{ y: 10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
+                                        >
+                                            Recording…
                                         </motion.span>
                                     ) : directMessageUserInfo?.isOnline ? (
                                         <motion.span
@@ -143,6 +155,17 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                             className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
                                         >
                                             Typing…
+                                        </motion.span>
+                                    ) : isRecording ? (
+                                        <motion.span
+                                            key="recording"
+                                            initial={{ y: 10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
+                                        >
+                                            Recording…
                                         </motion.span>
                                     ) : showGroupHint ? (
                                         <motion.span

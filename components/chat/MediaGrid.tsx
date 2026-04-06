@@ -19,13 +19,22 @@ interface MediaGridProps {
   receipt?: React.ReactNode
   messageStatus?: string
   allVisualMedia?: MediaFile[]
+  currentUserId?: string
+  onDeleteFile?: (file: MediaFile) => void
 }
 
-function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [] }: MediaGridProps) {
+function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [], currentUserId, onDeleteFile }: MediaGridProps) {
   const { openViewer } = useMediaViewer()
 
+  const filteredFiles = files.filter(f => {
+    if (!f.deleted) return true;
+    if (f.deleted.delete_type === "for_everyone") return false;
+    if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUserId) return false;
+    return true;
+  });
+
   // Collect all viewable files (image, video, audio) for the local grid
-  const viewableFiles = files.filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording')
+  const viewableFiles = filteredFiles.filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording')
 
   const openViewerHandler = useCallback((file: MediaFile) => {
     // We want to open the viewer using the CHAT-WIDE visual media array
@@ -33,14 +42,14 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
     const idx = mediaToUse.findIndex(f => f.file_id === file.file_id)
 
     if (idx >= 0 && (file.media_url || file.preview_url || file.file_blob)) {
-      openViewer(mediaToUse, idx)
+      openViewer(mediaToUse, idx, onDeleteFile)
     }
-  }, [viewableFiles, allVisualMedia, openViewer])
+  }, [viewableFiles, allVisualMedia, openViewer, onDeleteFile])
 
-  if (!files || files.length === 0) return null
+  if (!filteredFiles || filteredFiles.length === 0) return null
 
-  const visuals = files.filter(f => f.type === 'image' || f.type === 'video')
-  const attachments = files.filter(f => f.type !== 'image' && f.type !== 'video')
+  const visuals = filteredFiles.filter(f => f.type === 'image' || f.type === 'video')
+  const attachments = filteredFiles.filter(f => f.type !== 'image' && f.type !== 'video')
 
   const renderVisual = (
     file: MediaFile,

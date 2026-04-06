@@ -20,6 +20,7 @@ import {
   Play,
   Pause,
   Headphones,
+  Trash2,
 } from 'lucide-react'
 import { MediaFile } from '@/types/mediaTypes'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,8 @@ export interface MediaViewerProps {
   initialIndex?: number
   /** Called when the viewer is closed */
   onClose: () => void
+  /** Called when a file is deleted */
+  onDelete?: (file: MediaFile) => void
 }
 
 function useFileUrl(file: MediaFile | undefined) {
@@ -169,7 +172,7 @@ function ViewerAudioPlayer({ file }: { file: MediaFile }) {
 }
 
 // ─── Main Viewer ──────────────────────────────────────────────────────
-function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose }: MediaViewerProps) {
+function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose, onDelete }: MediaViewerProps) {
   const [activeIndex, setActiveIndex] = useState(initialIndex)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -360,6 +363,14 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose 
             title="Download"
           >
             <Download size={20} />
+          </button>
+          
+          <button
+            onClick={() => activeFile && onDelete?.(activeFile)}
+            className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={20} />
           </button>
         </div>
       </div>

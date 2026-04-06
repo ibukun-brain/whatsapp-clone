@@ -55,12 +55,270 @@ import { chatCategories } from "@/lib/utils";
 import { db } from "@/lib/indexdb";
 import { axiosInstance } from "@/lib/axios";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
-import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults } from "@/types";
+import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults, DirectMessage, GroupChat } from "@/types";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
-import { useTypingStore } from "@/lib/stores/typing-store";
+import { useTypingStore, type userTypingType } from "@/lib/stores/typing-store";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Image as ImageIcon, Video, Mic, Headphones } from "lucide-react";
+import { FileText, Image as ImageIcon, Video, Mic, Headphones, Ban } from "lucide-react";
+
+import type { Chat, Contact } from "@/types";
+
+// ─── Memoized: Recent content preview (files / text / deletion / voice) ────
+type ChatRecentContentProps = {
+  chat: Chat;
+  currentUserId: string | undefined;
+};
+
+const ChatRecentContent = React.memo(function ChatRecentContent({
+  chat,
+  currentUserId,
+}: ChatRecentContentProps) {
+  const obj = chat.direct_message || chat.group_chat;
+  if (!obj) return null;
+
+  const content = obj.recent_content;
+  const files = obj.recent_files;
+  const type = obj.recent_message_type;
+  const isMine = currentUserId === obj.recent_user_id;
+  const deleted = obj.recent_deleted;
+
+  const visibleFiles =
+    files?.filter((f) => {
+      if (!f.deleted) return true;
+      if (f.deleted.delete_type === "for_everyone") return false;
+      if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUserId) return false;
+      return true;
+    }) || [];
+
+  const isDeletedForEveryone =
+    deleted?.delete_type === "for_everyone" ||
+    (!content && files && files.length > 0 && files.every((f) => f.deleted?.delete_type === "for_everyone"));
+  const isDeletedForMe =
+    (deleted?.delete_type === "for_me" && deleted?.deleted_by === currentUserId) ||
+    (!content && files && files.length > 0 && visibleFiles.length === 0 && !isDeletedForEveryone);
+
+  const latestFileId = files && files.length > 0 ? files[files.length - 1].file_id : null;
+  const isLatestFileDeleted = !!(deleted?.file_id && deleted.file_id === latestFileId);
+
+  // Show deletion placeholder if:
+  // 1. The deletion is for the whole message (no file_id on deleted object)
+  // 2. OR the deletion specifically targets the latest file
+  // 3. OR the message has no text content and all its files are effectively gone
+  const showDeletedPlaceholder =
+    (deleted && (!deleted.file_id || isLatestFileDeleted)) ||
+    (!content && files && files.length > 0 && visibleFiles.length === 0);
+
+  // Deletion logic for recent content
+  if (showDeletedPlaceholder && (isDeletedForEveryone || isDeletedForMe)) {
+    const deletedByMe =
+      deleted?.deleted_by === currentUserId ||
+      (files && files.some((f) => f.deleted?.deleted_by === currentUserId));
+    return (
+      <span className="flex items-center gap-1 w-full truncate italic text-muted-foreground">
+        <Ban size={14} className="shrink-0" />
+        <span className="truncate">
+          {deletedByMe ? "You deleted this message" : "This message was deleted"}
+        </span>
+      </span>
+    );
+  }
+
+  const voiceMessage = chat.direct_message?.recent_voice_message || chat.group_chat?.recent_voice_message;
+  const voiceDuration = chat.direct_message?.recent_voice_message_duration || chat.group_chat?.recent_voice_message_duration;
+
+  // Receipt logic
+  const renderReceipt = () => {
+    if (!isMine) return null;
+    if (chat.direct_message) {
+      return (
+        <span className="shrink-0 -mt-0.5">
+          {chat.direct_message.read_date ? (
+            <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" />
+          ) : chat.direct_message.delivered_date ? (
+            <CheckIcon2 height={18} width={18} />
+          ) : (
+            <CheckIcon1 height={18} width={14} />
+          )}
+        </span>
+      );
+    }
+    return (
+      <span className="shrink-0 relative -mt-0.5 flex items-center">
+        {chat.group_chat?.receipt === "read" ? (
+          <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" />
+        ) : chat.group_chat?.receipt === "delivered" ? (
+          <CheckIcon2 height={18} width={18} />
+        ) : (
+          <CheckIcon1 height={18} width={14} />
+        )}
+      </span>
+    );
+  };
+
+  const senderPrefix =
+    !isMine && chat.group_chat?.recent_user_display_name ? (
+      <span>{chat.group_chat.recent_user_display_name}:{" "}</span>
+    ) : isMine && chat.group_chat ? (
+      <span>You:{" "}</span>
+    ) : null;
+
+  if (voiceMessage) {
+    return (
+      <span className="flex items-center gap-0.5 w-full truncate">
+        {renderReceipt()}
+        {senderPrefix}
+        <span className="flex items-center gap-0.5 truncate text-muted-foreground">
+          <Mic size={16} className={cn("shrink-0")} />
+          <span className="flex items-center gap-0.5">
+            <span className="truncate">Voice message</span>
+            {voiceDuration && <span className="shrink-0">({formatDuration(voiceDuration)})</span>}
+          </span>
+        </span>
+      </span>
+    );
+  }
+
+  if (visibleFiles.length > 0) {
+    const lastFile = visibleFiles[visibleFiles.length - 1];
+    const fileType = lastFile?.type || "image";
+    let IconComp: any = ImageIcon;
+    let label = "Photo";
+
+    if (fileType === "video") {
+      IconComp = Video;
+      label = "Video";
+    } else if (fileType === "voice_recording") {
+      IconComp = Mic;
+      label = "Voice message";
+    } else if (fileType === "audio") {
+      IconComp = type === "voice" ? Mic : Headphones;
+      label = type === "voice" ? "Voice message" : "Audio";
+    } else if (fileType !== "image") {
+      IconComp = FileText;
+      label = "Document";
+    }
+
+    const fileCount = visibleFiles.length;
+    const isMultiple = fileCount > 1;
+    const caption = isMultiple ? "" : lastFile?.caption || label;
+
+    return (
+      <span className="flex items-center gap-1 w-full truncate">
+        {renderReceipt()}
+        {senderPrefix}
+        <span className="flex items-center gap-1 truncate text-muted-foreground">
+          <IconComp size={16} className={cn("shrink-0")} />
+          {isMultiple ? (
+            <span className="font-medium">
+              {label} {fileCount}
+            </span>
+          ) : (
+            <span className="truncate">{caption}</span>
+          )}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1 w-full truncate">
+      {renderReceipt()}
+      {senderPrefix}
+      <span className="truncate">
+        {content && content.length > 20 ? `${content.slice(0, 30)}...` : content}
+      </span>
+    </span>
+  );
+});
+
+// ─── Memoized: Full chat-item preview (typing / recording / draft / content) ──
+type ChatItemPreviewProps = {
+  chat: Chat;
+  typingList: userTypingType[];
+  recordingList: userTypingType[];
+  contacts: Contact[] | undefined;
+  currentUserId: string | undefined;
+  activeChatId: string | null;
+};
+
+const ChatItemPreview = React.memo(function ChatItemPreview({
+  chat,
+  typingList,
+  recordingList,
+  contacts,
+  currentUserId,
+  activeChatId,
+}: ChatItemPreviewProps) {
+  const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
+
+  // ── Recording indicator (highest priority) ──────────────────
+  if (recordingList.length > 0) {
+    const latestRecorder = recordingList[recordingList.length - 1];
+    const user = contacts?.find((contact) => contact.contact_user.id === latestRecorder.id);
+    return (
+      <>
+        {chat.group_chat ? (
+          <span className="text-[#00a884] font-normal">
+            {recordingList.length > 1
+              ? `${recordingList.length} people recording audio...`
+              : `${user?.contact_name || latestRecorder.phone} is recording audio...`}
+          </span>
+        ) : (
+          <span className="text-[#00a884] font-normal flex items-center gap-1">
+            <Mic size={14} /> is recording audio...
+          </span>
+        )}
+      </>
+    );
+  }
+
+  // ── Typing indicator (second priority) ──────────────────
+  if (typingList.length > 0) {
+    const latestTyper = typingList[typingList.length - 1];
+    const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id);
+    return (
+      <>
+        {chat.group_chat ? (
+          <span className="text-[#00a884] font-normal">
+            {typingList.length > 1
+              ? `${typingList.length} people typing...`
+              : `${user?.contact_name || latestTyper.phone} is typing...`}
+          </span>
+        ) : (
+          <span className="text-[#00a884] font-normal">is typing...</span>
+        )}
+      </>
+    );
+  }
+
+  // ── Draft indicator ────────────────────
+  if (chat.draft?.text && chatItemId !== activeChatId) {
+    const isVoiceDraft = !!chat.draft.voiceBlob;
+    return (
+      <span className="inline-flex gap-1 items-center">
+        <span className="text-[#1daa61] font-medium shrink-0">Draft:</span>
+        {isVoiceDraft ? (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <Mic size={14} className="shrink-0" />
+            <span>
+              {chat.draft.text.replace("🎙 ", "").length > 20
+                ? `${chat.draft.text.replace("🎙 ", "").slice(0, 30)}...`
+                : chat.draft.text.replace("🎙 ", "")}
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            {chat.draft.text.length > 20 ? `${chat.draft.text.slice(0, 30)}...` : chat.draft.text}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  // ── Normal recent content ─────────────────────────────────
+  return <ChatRecentContent chat={chat} currentUserId={currentUserId} />;
+});
 
 export const SecondarySidebar = () => {
   const hasFetched = React.useRef(false);
@@ -169,6 +427,7 @@ export const SecondarySidebar = () => {
     async () => await db.contact.toArray()
   );
   const typingChats = useTypingStore((s) => s.typingChats);
+  const recordingChats = useTypingStore((s) => s.recordingChats);
   React.useEffect(() => {
     const fetchData = async () => {
       if (!isAuthenticated) return;
@@ -451,140 +710,14 @@ export const SecondarySidebar = () => {
                         </p>
                         <div className="max-w-[370px]">
                           <p className="truncate whitespace-nowrap">
-                            {(() => {
-                              const chatItemId = chat.direct_message?.id || chat.group_chat?.id;
-                              const typingList = chatItemId ? (typingChats[chatItemId] ?? []) : [];
-
-                              // ── Typing indicator (highest priority) ──────────────────
-                              if (typingList.length > 0) {
-                                const latestTyper = typingList[typingList.length - 1];
-                                const user = contacts?.find((contact) => contact.contact_user.id === latestTyper.id);
-                                return (
-                                  <>
-                                    {chat.group_chat ? <span className="text-[#00a884] font-normal">{typingList.length > 1 ? `${typingList.length} people typing...` : user?.contact_name || latestTyper.phone} is typing...</span> : <span className="text-[#00a884] font-normal">typing...</span>}
-
-                                  </>);
-                              }
-
-                              // ── Draft indicator (second priority) ────────────────────
-                              if (chat.draft?.text && chatItemId !== activeChatId) {
-                                const isVoiceDraft = !!chat.draft.voiceBlob;
-                                return (
-                                  <span className="inline-flex gap-1 items-center">
-                                    <span className="text-[#1daa61] font-medium shrink-0">Draft:</span>
-                                    {isVoiceDraft ? (
-                                      <span className="flex items-center gap-1 text-muted-foreground">
-                                        <Mic size={14} className="shrink-0" />
-                                        <span>{chat.draft.text.replace('🎙 ', '')}</span>
-                                      </span>
-                                    ) : (
-                                      <span className="truncate text-muted-foreground">{chat.draft.text}</span>
-                                    )}
-                                  </span>
-                                );
-                              }
-
-                              // ── Normal recent content ─────────────────────────────────
-                              return (
-                                <>
-                                  {(() => {
-                                    const obj = chat.direct_message || chat.group_chat;
-                                    if (!obj) return null;
-
-                                    const content = obj.recent_content;
-                                    const files = obj.recent_files;
-                                    const type = obj.recent_message_type;
-                                    const isMine = currentUser?.id === obj.recent_user_id;
-
-                                    const voiceMessage = chat.direct_message?.recent_voice_message || chat.group_chat?.recent_voice_message;
-                                    const voiceDuration = chat.direct_message?.recent_voice_message_duration || chat.group_chat?.recent_voice_message_duration;
-
-                                    // Receipt logic
-                                    const renderReceipt = () => {
-                                      if (!isMine) return null;
-                                      if (chat.direct_message) {
-                                        return (
-                                          <span className="shrink-0 -mt-0.5">
-                                            {chat.direct_message.read_date ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.direct_message.delivered_date ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
-                                          </span>
-                                        );
-                                      }
-                                      return (
-                                        <span className="shrink-0 relative -mt-0.5 flex items-center">
-                                          {chat.group_chat?.receipt === "read" ? <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" /> : chat.group_chat?.receipt === "delivered" ? <CheckIcon2 height={18} width={18} /> : <CheckIcon1 height={18} width={14} />}
-                                        </span>
-                                      );
-                                    };
-
-                                    const senderPrefix = !isMine && chat.group_chat?.recent_user_display_name ? <span>{chat.group_chat.recent_user_display_name}:{" "}</span> : isMine && chat.group_chat ? <span>You:{" "}</span> : null;
-
-                                    if (voiceMessage) {
-                                      return (
-                                        <span className="flex items-center gap-0.5 w-full truncate">
-                                          {renderReceipt()}
-                                          {senderPrefix}
-                                          <span className="flex items-center gap-0.5 truncate text-muted-foreground">
-                                            <Mic size={16} className={cn("shrink-0")} />
-                                            <span className="flex items-center gap-0.5">
-                                              <span className="truncate">Voice message</span>
-                                              {voiceDuration && <span className="shrink-0">({formatDuration(voiceDuration)})</span>}
-                                            </span>
-                                          </span>
-                                        </span>
-                                      );
-                                    }
-
-                                    if (files && files.length > 0) {
-                                      const lastFile = files[files.length - 1];
-                                      const fileType = lastFile.type;
-                                      let IconComp: any = ImageIcon;
-                                      let label = "Photo";
-
-                                      if (fileType === 'video') {
-                                        IconComp = Video;
-                                        label = "Video";
-                                      } else if (fileType === 'voice_recording') {
-                                        IconComp = Mic;
-                                        label = "Voice message";
-                                      } else if (fileType === 'audio') {
-                                        IconComp = type === 'voice' ? Mic : Headphones;
-                                        label = type === 'voice' ? "Voice message" : "Audio";
-                                      } else if (fileType !== 'image') {
-                                        IconComp = FileText;
-                                        label = "Document";
-                                      }
-
-                                      const fileCount = files.length;
-                                      const isMultiple = fileCount > 1;
-                                      const caption = isMultiple ? "" : (lastFile.caption || label);
-
-                                      return (
-                                        <span className="flex items-center gap-1 w-full truncate">
-                                          {renderReceipt()}
-                                          {senderPrefix}
-                                          <span className="flex items-center gap-1 truncate text-muted-foreground">
-                                            <IconComp size={16} className={cn("shrink-0")} />
-                                            {isMultiple ? (
-                                              <span className="font-medium">{label}{" "}{fileCount}</span>
-                                            ) : (
-                                              <span className="truncate">{caption}</span>
-                                            )}
-                                          </span>
-                                        </span>
-                                      );
-                                    }
-
-                                    return (
-                                      <span className="flex items-center gap-1 w-full truncate">
-                                        {renderReceipt()}
-                                        {senderPrefix}
-                                        <span className="truncate">{content}</span>
-                                      </span>
-                                    );
-                                  })()}
-                                </>
-                              );
-                            })()}
+                            <ChatItemPreview
+                              chat={chat}
+                              typingList={(chat.direct_message?.id || chat.group_chat?.id) ? (typingChats[(chat.direct_message?.id || chat.group_chat?.id)!] ?? []) : []}
+                              recordingList={(chat.direct_message?.id || chat.group_chat?.id) ? (recordingChats[(chat.direct_message?.id || chat.group_chat?.id)!] ?? []) : []}
+                              contacts={contacts}
+                              currentUserId={currentUser?.id}
+                              activeChatId={activeChatId}
+                            />
                           </p>
                         </div>
                       </div>

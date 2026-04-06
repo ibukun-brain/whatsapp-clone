@@ -6,7 +6,7 @@ import { MediaFile } from '@/types/mediaTypes'
 import MediaViewer from './MediaViewer'
 
 interface MediaViewerContextType {
-  openViewer: (files: MediaFile[], initialIndex: number) => void
+  openViewer: (files: MediaFile[], initialIndex: number, onDelete?: (file: MediaFile) => void) => void
   closeViewer: () => void
 }
 
@@ -17,15 +17,16 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
     isOpen: boolean
     files: MediaFile[]
     initialIndex: number
+    onDelete?: (file: MediaFile) => void
   }>({
     isOpen: false,
     files: [],
-    initialIndex: 0
+    initialIndex: 0,
+    onDelete: undefined
   })
 
-  const openViewer = useCallback((files: MediaFile[], initialIndex: number) => {
-
-    setViewerState({ isOpen: true, files, initialIndex })
+  const openViewer = useCallback((files: MediaFile[], initialIndex: number, onDelete?: (file: MediaFile) => void) => {
+    setViewerState({ isOpen: true, files, initialIndex, onDelete })
   }, [])
 
   const closeViewer = useCallback(() => {
@@ -40,6 +41,7 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
           files={viewerState.files}
           initialIndex={viewerState.initialIndex}
           onClose={closeViewer}
+          onDelete={viewerState.onDelete}
         />,
         document.body
       )}

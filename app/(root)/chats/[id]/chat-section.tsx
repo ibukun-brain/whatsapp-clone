@@ -8,7 +8,7 @@ import {
     AttachmentPlusIcon,
     SendIcon,
 } from "@/components/icons/chats-icon";
-import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Circle, Pause, Play, Send, Mic } from "lucide-react";
+import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Mic } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
@@ -34,7 +34,14 @@ import { ContactSelectModal } from "./contact-select-modal";
 import { Contact } from "@/types";
 import { toast } from "sonner";
 import { useMediaUpload } from "@/hooks/use-media-upload";
-import { MediaViewerProvider } from "@/components/chat/MediaViewerContext";
+import { MediaFile } from "@/types/mediaTypes";
+import { MediaViewerProvider, useMediaViewer } from "@/components/chat/MediaViewerContext";
+import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -128,6 +135,7 @@ const groupMediaMessages = (messages: any[]) => {
 };
 
 const ChatSection = ({ chatId }: { chatId: string }) => {
+    const { closeViewer } = useMediaViewer();
     const directMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.direct_message?.id === chatId).first(), [chatId])
     const groupMessage = useLiveQuery(async () => await db.chatlist.filter(chat => chat.group_chat?.id === chatId).first(), [chatId])
     const _currentUser = useLiveQuery(
@@ -163,6 +171,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [isAudioPreviewOpen, setIsAudioPreviewOpen] = React.useState(false);
     const [isContactModalOpen, setIsContactModalOpen] = React.useState(false);
 
+    // ── Selection Mode ─────────────────────────────────────────────────
+    const [isSelectionMode, setIsSelectionMode] = React.useState(false);
+    const [selectedMessageIds, setSelectedMessageIds] = React.useState<Set<string>>(new Set());
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+    const [fileToDelete, setFileToDelete] = React.useState<MediaFile | null>(null);
+    const [isFileDeleteDialogOpen, setIsFileDeleteDialogOpen] = React.useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
@@ -186,6 +201,26 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     // ── Determine chat type ──────────────────────────────────────────
     const chatType = groupMessage ? "groupchat" : directMessage ? "directmessage" : null;
+
+    // ── WebSocket (per-chat) ──────────────────────────────────────────
+    // Handles send / edit / delete / reply for THIS chat only.
+    // Reconnects automatically when chatId changes.
+    const CHAT_WS_URL = `ws://localhost:8000/ws/chats/${chatId}/`;
+    const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage, readyState } = useWebSocket(CHAT_WS_URL, {
+        shouldReconnect: () => true,
+        share: true,
+    });
+
+    // ── Global WS send (typing indicators) ───────────────────────────
+    // sendJsonMessage on the global ws/chats/ socket lives in GlobalWsProvider.
+    // We grab the stable reference from the store.
+    const globalSendMessage = useGlobalWsStore((s) => s.sendMessage);
+
+    // Array of users currently typing in this chat.
+    const typingUsers = useTypingStore((s) => s.typingChats[chatId] ?? EMPTY_TYPING_SET);
+    // Array of users currently recording in this chat.
+    const recordingUsers = useTypingStore((s) => s.recordingChats[chatId] ?? EMPTY_TYPING_SET);
+
 
     const messageDeliveredRecipients = useLiveQuery<GroupMessageChatRecipients[]>(
         () => {
@@ -243,7 +278,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        
+
         // Deduplicate by client_msg_id to prevent key collisions
         const seenClientIds = new Set();
         const unique = combined.filter(m => {
@@ -253,8 +288,20 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             return true;
         });
 
-        return groupMediaMessages(unique);
-    }, [directMessageChats, localOptimisticMessages, chatId, chatType]);
+        const filtered = unique.filter(m => {
+            if (m.deleted && m.deleted.delete_type === "for_me" && m.deleted.deleted_by === currentUser?.id) return false;
+
+            // If all files are deleted 'for me' and there's no text content, hide the message
+            if (m.files && m.files.length > 0 && !m.content) {
+                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser?.id);
+                if (allDoneForMe) return false;
+            }
+
+            return true;
+        });
+
+        return groupMediaMessages(filtered);
+    }, [directMessageChats, localOptimisticMessages, chatId, chatType, currentUser?.id]);
 
     const processedGroupMessages = useMemo(() => {
         if (chatType !== "groupchat") return [];
@@ -269,7 +316,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        
+
         // Deduplicate by client_msg_id to prevent key collisions
         const seenClientIds = new Set();
         const unique = combined.filter(m => {
@@ -279,20 +326,59 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             return true;
         });
 
-        return groupMediaMessages(unique);
-    }, [groupMessageChats, localOptimisticMessages, chatId, chatType]);
+        const filtered = unique.filter(m => {
+            if (m.deleted && m.deleted.delete_type === "for_me" && m.deleted.deleted_by === currentUser?.id) return false;
 
-    const allVisualMedia = useMemo(() => {
+            // If all files are deleted 'for me' and there's no text content, hide the message
+            if (m.files && m.files.length > 0 && !m.content) {
+                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser?.id);
+                if (allDoneForMe) return false;
+            }
+
+            return true;
+        });
+
+        return groupMediaMessages(filtered);
+    }, [groupMessageChats, localOptimisticMessages, chatId, chatType, currentUser?.id]);
+
+    // -- Stable allVisualMedia computation --
+    const allVisualMediaRaw = useMemo(() => {
         const messages = chatType === "groupchat" ? processedGroupMessages : processedDirectMessages;
+        if (!currentUser) return [];
+
         return messages
             .flatMap(m => m.files || [])
-            .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording');
-    }, [processedDirectMessages, processedGroupMessages, chatType]);
+            .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording')
+            .filter(f => {
+                if (!f.deleted) return true;
+                if (f.deleted.delete_type === "for_everyone") return false;
+                if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser.id) return false;
+                return true;
+            });
+    }, [processedDirectMessages, processedGroupMessages, chatType, currentUser]);
+
+    // use a ref to maintain stability of the allVisualMedia identity if the content hasn't changed
+    const allVisualMediaRef = useRef(allVisualMediaRaw);
+    const allVisualMedia = useMemo(() => {
+        const isSame = allVisualMediaRef.current.length === allVisualMediaRaw.length &&
+            allVisualMediaRef.current.every((f, i) => f.file_id === allVisualMediaRaw[i].file_id && f.status === allVisualMediaRaw[i].status);
+
+        if (!isSame) {
+            allVisualMediaRef.current = allVisualMediaRaw;
+        }
+        return allVisualMediaRef.current;
+    }, [allVisualMediaRaw]);
 
     const setActiveAudioId = useVoicePlaybackStore((s) => s.setActiveAudioId);
 
+    // use a ref for messages to keep handlePlayNext stable
+    const messagesForPlayNextRef = useRef<any[]>([]);
+    useEffect(() => {
+        messagesForPlayNextRef.current = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+    }, [processedGroupMessages, processedDirectMessages, chatType]);
+
     const handlePlayNext = useCallback((currentMsgId: string) => {
-        const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+        const messages = messagesForPlayNextRef.current;
         const currentIndex = messages.findIndex(m => m.id === currentMsgId);
         if (currentIndex === -1) return;
 
@@ -301,7 +387,208 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (nextVoiceMsg) {
             setActiveAudioId(nextVoiceMsg.id);
         }
-    }, [chatType, processedGroupMessages, processedDirectMessages, setActiveAudioId]);
+    }, [setActiveAudioId]);
+
+    // ── Selection Mode Handlers ───────────────────────────────────────
+    const handleEnterSelectionMode = useCallback((msgId: string) => {
+        setIsSelectionMode(true);
+        setSelectedMessageIds(new Set([msgId]));
+    }, []);
+
+    const handleToggleSelect = useCallback((msgId: string) => {
+        setSelectedMessageIds(prev => {
+            const next = new Set(prev);
+            if (next.has(msgId)) {
+                next.delete(msgId);
+            } else {
+                next.add(msgId);
+            }
+            if (next.size === 0) {
+                setIsSelectionMode(false);
+            }
+            return next;
+        });
+    }, []);
+
+    const handleExitSelectionMode = useCallback(() => {
+        setIsSelectionMode(false);
+        setSelectedMessageIds(new Set());
+    }, []);
+
+    const handleDeleteSelected = useCallback(() => {
+        setIsDeleteDialogOpen(true);
+    }, []);
+
+    const confirmDeleteForMe = useCallback(() => {
+        if (!currentUser) return;
+
+        const selectedArr = Array.from(selectedMessageIds);
+        const messageIds = selectedArr.filter(id => !id.includes(":"));
+        const fileSelections = selectedArr
+            .filter(id => id.includes(":"))
+            .map(id => {
+                const [mId, fId] = id.split(":");
+                return { message_id: mId, file_id: fId };
+            });
+
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "delete",
+                chat_type: chatType,
+                message: {
+                    delete_type: "for_me",
+                    user_ids: [currentUser.id],
+                    message_ids: messageIds,
+                    file_selections: fileSelections
+                }
+            }
+        });
+
+        handleExitSelectionMode();
+        setIsDeleteDialogOpen(false);
+    }, [selectedMessageIds, handleExitSelectionMode, currentUser, chatType, sendChatMessage]);
+
+    const confirmDeleteForEveryone = useCallback(() => {
+        if (!currentUser) return;
+
+        const selectedArr = Array.from(selectedMessageIds);
+        const messageIds = selectedArr.filter(id => !id.includes(":"));
+        const fileSelections = selectedArr
+            .filter(id => id.includes(":"))
+            .map(id => {
+                const [mId, fId] = id.split(":");
+                return { message_id: mId, file_id: fId };
+            });
+
+        let userIds: string[] = [];
+
+        if (chatType === "directmessage" && directMessage?.direct_message) {
+            userIds = [currentUser.id, directMessage.direct_message.dm_user_id];
+        } else if (chatType === "groupchat") {
+            userIds = groupMembers.map(m => m.user?.id).filter(id => id !== undefined) as string[];
+        }
+
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "delete",
+                message: {
+                    delete_type: "for_everyone",
+                    user_ids: userIds,
+                    message_ids: messageIds,
+                    file_selections: fileSelections
+                }
+            }
+        });
+
+        handleExitSelectionMode();
+        setIsDeleteDialogOpen(false);
+    }, [selectedMessageIds, handleExitSelectionMode, currentUser, chatType, directMessage, groupMembers, sendChatMessage]);
+
+    const handleDeleteFile = useCallback((file: MediaFile) => {
+        setFileToDelete(file);
+        setIsFileDeleteDialogOpen(true);
+    }, []);
+
+    const confirmDeleteFileForMe = useCallback(() => {
+        if (!currentUser || !fileToDelete) return;
+
+        const isDM = chatType === "directmessage";
+        const table = isDM ? db.directmessagechats : db.groupmessagechats;
+
+        // Optimistic update
+        table.where(isDM ? 'direct_message_id' : 'groupchat_id').equals(chatId).toArray().then(allMsgs => {
+            const parentMsg = allMsgs.find(m => m.files?.some(f => f.file_id === fileToDelete.file_id));
+            if (parentMsg && parentMsg.files) {
+                const updatedFiles = parentMsg.files.map(f => {
+                    if (f.file_id === fileToDelete.file_id) {
+                        return {
+                            ...f,
+                            deleted: {
+                                file_id: f.file_id,
+                                delete_type: "for_me",
+                                deleted_by: currentUser.id,
+                            }
+                        };
+                    }
+                    return f;
+                });
+                table.update(parentMsg.id, { files: updatedFiles });
+            }
+        });
+
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "delete",
+                chat_type: chatType,
+                message: {
+                    delete_type: "for_me",
+                    user_ids: [currentUser.id],
+                    file_ids: [fileToDelete.file_id]
+                }
+            }
+        });
+
+        setIsFileDeleteDialogOpen(false);
+        setFileToDelete(null);
+        closeViewer();
+    }, [fileToDelete, currentUser, chatType, sendChatMessage, closeViewer]);
+
+    const confirmDeleteFileForEveryone = useCallback(() => {
+        if (!currentUser || !fileToDelete) return;
+
+        let userIds: string[] = [];
+        if (chatType === "directmessage" && directMessage?.direct_message) {
+            userIds = [currentUser.id, directMessage.direct_message.dm_user_id];
+        } else if (chatType === "groupchat") {
+            userIds = groupMembers.map(m => m.user?.id).filter(id => id !== undefined) as string[];
+        }
+
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "delete",
+                message: {
+                    delete_type: "for_everyone",
+                    user_ids: userIds,
+                    file_ids: [fileToDelete.file_id]
+                }
+            }
+        });
+
+        setIsFileDeleteDialogOpen(false);
+        setFileToDelete(null);
+        closeViewer();
+    }, [fileToDelete, currentUser, chatType, directMessage, groupMembers, sendChatMessage, closeViewer]);
+
+    const canDeleteFileForEveryone = useMemo(() => {
+        if (!fileToDelete || !currentUser) return false;
+        const allMsgs = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+        const parentMsg = allMsgs.find(m => m.files?.some((f: any) => f.file_id === fileToDelete.file_id));
+        if (!parentMsg) return false;
+        const msgUserId = typeof parentMsg.user === 'object' && parentMsg.user !== null ? (parentMsg.user as User).id : (parentMsg.user as unknown as string);
+        return msgUserId === currentUser.id;
+    }, [fileToDelete, chatType, processedGroupMessages, processedDirectMessages, currentUser]);
+
+    // Check if "Delete for everyone" should be available
+    // (Only if ALL selected messages are from the current user)
+    const canDeleteForEveryone = useMemo(() => {
+        if (selectedMessageIds.size === 0) return false;
+        const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+        return Array.from(selectedMessageIds).every(id => {
+            const msg = messages.find(m => m.id === id);
+            if (!msg) return false;
+            const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
+            return msgUserId === currentUser?.id;
+        });
+    }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, chatType]);
+
+    // Reset selection mode when switching chats
+    React.useEffect(() => {
+        handleExitSelectionMode();
+    }, [chatId, handleExitSelectionMode]);
 
     // ── Scroll Manager Hook ──────────────────────────────────────────
     const messagesLength = chatType === "groupchat"
@@ -319,25 +606,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         scrollToFirstUnread,
         hasUnreadBanner: isUnreadBannerVisible,
     });
-
-    // ── WebSocket (per-chat) ──────────────────────────────────────────
-    // Handles send / edit / delete / reply for THIS chat only.
-    // Reconnects automatically when chatId changes.
-    const CHAT_WS_URL = `ws://localhost:8000/ws/chats/${chatId}/`;
-    const { sendJsonMessage: sendChatMessage, lastJsonMessage: lastChatMessage, readyState } = useWebSocket(CHAT_WS_URL, {
-        shouldReconnect: () => true,
-        share: true,
-    });
-
-    // ── Global WS send (typing indicators) ───────────────────────────
-    // sendJsonMessage on the global ws/chats/ socket lives in GlobalWsProvider.
-    // We grab the stable reference from the store.
-    const globalSendMessage = useGlobalWsStore((s) => s.sendMessage);
-
-    // Array of users currently typing in this chat.
-    // Falls back to the stable EMPTY_TYPING constant to avoid re-render loops.
-    const typingUsers = useTypingStore((s) => s.typingChats[chatId] ?? EMPTY_TYPING_SET);
-
     // Handle incoming per-chat WebSocket events (send / edit / delete / reply).
     React.useEffect(() => {
         if (!lastChatMessage) return;
@@ -387,7 +655,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
             const incomingMsg = (msg.data as WSData).groupchat_messages
             const recipients = (msg.data as WSData).groupchat_message_recipients
-            console.log(recipients, "recipients delivered")
             // Clear local optimistic state if matches
             setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
             // Clean up any optimistic messages in DB that match the content and user
@@ -395,8 +662,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 .where('groupchat_id').equals(chatId)
                 .and(m => {
                     const mUserId = typeof m.user === 'object' && m.user !== null ? (m.user as User).id : (m.user as unknown as string);
-                    return (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || 
-                           (mUserId === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content);
+                    return (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) ||
+                        (mUserId === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content);
                 })
                 .delete()
                 .then(() => {
@@ -411,15 +678,95 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             }
             return;
         }
+
+        if ((msg.type === "directmessage" || msg.type === "groupchat") && msg.action === "delete" && msg.data) {
+            const deleteData = msg.data as unknown as {
+                delete_type: "for_me" | "for_everyone";
+                deleted_by: string;
+                message_ids?: string[];
+                file_selections?: { message_id: string; file_id: string }[];
+                file_ids?: string[];
+            };
+
+            const isDM = msg.type === "directmessage";
+            const table = isDM ? db.directmessagechats : db.groupmessagechats;
+
+            const processDeletions = async () => {
+                // 1. Handle full message deletions
+                if (deleteData.message_ids && deleteData.message_ids.length > 0) {
+                    for (const mId of deleteData.message_ids) {
+                        const existing = await table.get(mId);
+                        if (existing) {
+                            await table.update(mId, {
+                                deleted: {
+                                    message_id: mId,
+                                    delete_type: deleteData.delete_type,
+                                    deleted_by: deleteData.deleted_by,
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // 2. Handle specific file deletions
+                if (deleteData.file_selections && deleteData.file_selections.length > 0) {
+                    for (const selection of deleteData.file_selections) {
+                        const mId = selection.message_id;
+                        const fId = selection.file_id;
+                        const existing = await table.get(mId);
+                        if (existing && existing.files) {
+                            const updatedFiles = existing.files.map(f => {
+                                if (f.file_id === fId) {
+                                    return {
+                                        ...f,
+                                        deleted: {
+                                            file_id: fId,
+                                            delete_type: deleteData.delete_type,
+                                            deleted_by: deleteData.deleted_by,
+                                        }
+                                    };
+                                }
+                                return f;
+                            });
+                            await table.update(mId, { files: updatedFiles });
+                        }
+                    }
+                }
+
+                // 3. Handle file_ids (fallback/direct file deletion)
+                if (deleteData.file_ids && deleteData.file_ids.length > 0) {
+                    const allMsgs = await table.where(isDM ? 'direct_message_id' : 'groupchat_id').equals(chatId).toArray();
+                    for (const fId of deleteData.file_ids) {
+                        const parentMsg = allMsgs.find(m => m.files?.some(f => f.file_id === fId));
+                        if (parentMsg && parentMsg.files) {
+                            const updatedFiles = parentMsg.files.map(f => {
+                                if (f.file_id === fId) {
+                                    return {
+                                        ...f,
+                                        deleted: {
+                                            file_id: f.file_id,
+                                            delete_type: deleteData.delete_type,
+                                            deleted_by: deleteData.deleted_by,
+                                        }
+                                    };
+                                }
+                                return f;
+                            });
+                            await table.update(parentMsg.id, { files: updatedFiles });
+                        }
+                    }
+                }
+            };
+
+            processDeletions();
+            return;
+        }
     }, [lastChatMessage, chatId, currentUser]);
 
     // Clear local optimistic messages when switching chats
     React.useEffect(() => {
         setLocalOptimisticMessages([]);
     }, [chatId]);
-
-    // DMs: any entry in the array means the other person is typing
-    const isTyping = directMessage ? typingUsers.length > 0 : false;
 
     // Ref for the message input element
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -434,6 +781,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
         isTypingRef.current = false;
         globalSendMessage?.({
+            type: "typing",
             chatType,
             chatId,
             userTypingId: currentUser.id,
@@ -465,7 +813,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 isOptimistic: true,
                 forwarded: false,
                 edited: false,
-                deleted: false,
+                deleted: undefined,
                 client_msg_id: clientMsgId
             } as DirectMessageChats;
             // Add to local state IMMEDIATELY for zero latency
@@ -484,7 +832,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 depth: null,
                 forwarded: false,
                 edited: false,
-                deleted: false,
+                deleted: undefined,
                 timestamp: timestamp,
                 receipt: "sent",
                 isOptimistic: true,
@@ -510,6 +858,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             inputRef.current.value = "";
             inputRef.current.style.height = "auto";
         }
+        currentInputValueRef.current = "";
+        if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
         setHasText(false);
         stopTyping();
 
@@ -575,6 +925,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (!isTypingRef.current) {
             isTypingRef.current = true;
             globalSendMessage?.({
+                type: "typing",
                 chatType,
                 chatId,
                 userTypingId: currentUser.id,
@@ -587,6 +938,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         typingTimerRef.current = setTimeout(() => {
             isTypingRef.current = false;
             globalSendMessage?.({
+                type: "typing",
                 chatType,
                 chatId,
                 userTypingId: currentUser.id,
@@ -648,11 +1000,45 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     const startRecording = useCallback(() => {
         setIsRecording(true);
-    }, []);
+        globalSendMessage?.({
+            type: "recording",
+            chatType,
+            chatId,
+            userRecordingId: currentUser?.id,
+            isRecording: true,
+        });
+    }, [chatType, chatId, currentUser, globalSendMessage]);
+
+    const handleVoiceRecordingPause = useCallback(() => {
+        globalSendMessage?.({
+            type: "recording",
+            chatType,
+            chatId,
+            userRecordingId: currentUser?.id,
+            isRecording: false,
+        });
+    }, [chatType, chatId, currentUser, globalSendMessage]);
+
+    const handleVoiceRecordingResume = useCallback(() => {
+        globalSendMessage?.({
+            type: "recording",
+            chatType,
+            chatId,
+            userRecordingId: currentUser?.id,
+            isRecording: true,
+        });
+    }, [chatType, chatId, currentUser, globalSendMessage]);
 
 
     const handleVoiceRecordingStop = useCallback((file: File, duration: number) => {
         setIsRecording(false);
+        globalSendMessage?.({
+            type: "recording",
+            chatType,
+            chatId,
+            userRecordingId: currentUser?.id,
+            isRecording: false,
+        });
         setVoiceDraftBlob(undefined);
         setVoiceDraftDuration(0);
         setVoiceDraftMimeType('');
@@ -678,7 +1064,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 db.chatlist.update(chatItemIdRef.current, { draft: null });
             }
         });
-    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom]);
+    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom, globalSendMessage]);
 
     const handleVoiceDraft = useCallback((blob: Blob, duration: number, mimeType: string) => {
         // Update local state to keep in sync with draft
@@ -702,6 +1088,13 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     const handleVoiceRecordingCancel = useCallback(() => {
         setIsRecording(false);
+        globalSendMessage?.({
+            type: "recording",
+            chatType,
+            chatId,
+            userRecordingId: currentUser?.id,
+            isRecording: false,
+        });
         setVoiceDraftBlob(undefined);
         setVoiceDraftDuration(0);
         setVoiceDraftMimeType('');
@@ -709,7 +1102,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (chatItemIdRef.current) {
             db.chatlist.update(chatItemIdRef.current, { draft: null });
         }
-    }, []);
+    }, [chatType, chatId, currentUser, globalSendMessage]);
 
     const handleRemoveFile = (index: number) => {
         setPendingFiles(prev => {
@@ -766,6 +1159,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             console.error("Failed to send contacts:", error);
         }
     };
+
+
 
     // ─── Draft: restore when entering a chat ─────────────────────────────────
     // Depends on both chatId and chatItem so it retries once chatItem loads.
@@ -915,142 +1310,200 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
 
     return (
-        <MediaViewerProvider>
-            <SidebarInset>
-                <div className="flex bg-[#efeae2] h-screen overflow-hidden">
-                    {/* ── Main Chat Section ───────────────────────────── */}
-                    <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
-                        {/* ── Header ─────────────────────────────────────────── */}
-                        <ChatHeader
-                            onOpenInfo={() => setIsInfoOpen(true)}
-                            isTyping={isTyping}
-                            directMessageUserInfo={
-                                directMessage ? {
-                                    name: directMessage.name as DirectMessageName,
-                                    userId: directMessage.direct_message?.dm_user_id as string,
-                                    image: directMessage.direct_message?.image as string,
-                                    lastSeen: directMessage.direct_message?.last_seen ?? null,
-                                    isOnline: !!directMessage.direct_message?.is_online,
-                                } : null
-                            }
-                            groupMessageInfo={
-                                groupMessage ? {
-                                    groupId: chatId,
-                                    name: groupMessage.name as string,
-                                    image: groupMessage.group_chat?.image as string,
-                                    onlineUsersCount: groupMessage.group_chat?.online_users
-                                } : null
-                            }
-                            groupMembers={groupMembers}
-                            timezone={currentUser?.timezone}
-                        />
+        <SidebarInset>
+            <div className="flex bg-[#efeae2] h-screen overflow-hidden">
+                {/* ── Main Chat Section ───────────────────────────── */}
+                <div className="flex flex-col flex-1 border-l border-r border-[#d1d7db]">
+                    {/* ── Header ─────────────────────────────────────────── */}
+                    <ChatHeader
+                        onOpenInfo={() => setIsInfoOpen(true)}
+                        directMessageUserInfo={
+                            directMessage ? {
+                                name: directMessage.name as DirectMessageName,
+                                userId: directMessage.direct_message?.dm_user_id as string,
+                                image: directMessage.direct_message?.image as string,
+                                lastSeen: directMessage.direct_message?.last_seen ?? null,
+                                isOnline: !!directMessage.direct_message?.is_online,
+                            } : null
+                        }
+                        groupMessageInfo={
+                            groupMessage ? {
+                                groupId: chatId,
+                                name: groupMessage.name as string,
+                                image: groupMessage.group_chat?.image as string,
+                                onlineUsersCount: groupMessage.group_chat?.online_users
+                            } : null
+                        }
+                        groupMembers={groupMembers}
+                        timezone={currentUser?.timezone}
+                    />
 
-                        {/* ── Messages + Footer + Upload Preview wrapper ── */}
-                        <div className="flex-1 flex flex-col relative overflow-hidden chat-bg-doodle">
+                    {/* ── Messages + Footer + Upload Preview wrapper ── */}
+                    <div className="flex-1 flex flex-col relative overflow-hidden chat-bg-doodle">
 
-                            {/* ── Messages Area ───────────────────────────────────── */}
-                            <div
-                                ref={scrollContainerRef}
-                                onScroll={handleScroll}
-                                className="flex-1 overflow-y-auto py-4"
-                            >
-                                {/* direct message chats */}
-                                {currentUser && processedDirectMessages.length > 0 && (() => {
-                                    const unreadCount = unreadState.unreadCount;
-                                    const firstUnreadId = unreadState.firstUnreadId;
-                                    let lastDateLabel = "";
+                        {/* ── Messages Area ───────────────────────────────────── */}
+                        <div
+                            ref={scrollContainerRef}
+                            onScroll={handleScroll}
+                            className="flex-1 overflow-y-auto py-4"
+                        >
+                            {/* direct message chats */}
+                            {currentUser && processedDirectMessages.length > 0 && (() => {
+                                const unreadCount = unreadState.unreadCount;
+                                const firstUnreadId = unreadState.firstUnreadId;
+                                let lastDateLabel = "";
 
-                                    return processedDirectMessages.map((msg, index) => {
-                                        const prevMsg = index > 0 ? processedDirectMessages[index - 1] : null;
-                                        const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                        const showSeparator = dateLabel !== lastDateLabel;
-                                        if (showSeparator) lastDateLabel = dateLabel;
-                                        const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
+                                return processedDirectMessages.map((msg, index) => {
+                                    const prevMsg = index > 0 ? processedDirectMessages[index - 1] : null;
+                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                    const showSeparator = dateLabel !== lastDateLabel;
+                                    if (showSeparator) lastDateLabel = dateLabel;
+                                    const isConsecutive = !showSeparator && prevMsg?.user === msg.user;
+                                    return (
+                                        <React.Fragment key={msg.id}>
+                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                            {showSeparator && <DateSeparator label={dateLabel} />}
+                                            <MessageBubble
+                                                msg={msg}
+                                                currentUser={currentUser}
+                                                isDM={true}
+                                                isConsecutive={isConsecutive}
+                                                onShowInfo={setMessageInfoMsg}
+                                                onPlayNext={handlePlayNext}
+                                                allVisualMedia={allVisualMedia}
+                                                isSelectionMode={isSelectionMode}
+                                                selectedIds={selectedMessageIds}
+                                                onToggleSelect={handleToggleSelect}
+                                                onEnterSelectionMode={handleEnterSelectionMode}
+                                                peerAvatar={directMessage?.direct_message?.image}
+                                                peerName={!directMessage?.direct_message?.name?.contact_name.startsWith("+")
+                                                    ? directMessage?.direct_message?.name?.contact_name
+                                                    : directMessage?.direct_message?.name?.display_name}
+                                            />
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()}
+
+                            {/* group message chats */}
+                            {currentUser && processedGroupMessages.length > 0 && (() => {
+                                const unreadCount = unreadState.unreadCount;
+                                const firstUnreadId = unreadState.firstUnreadId;
+                                let lastDateLabel = "";
+
+                                return processedGroupMessages.map((msg, index) => {
+                                    const prevMsg = index > 0 ? processedGroupMessages[index - 1] : null;
+                                    const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
+                                    const showSeparator = dateLabel !== lastDateLabel;
+                                    if (showSeparator) lastDateLabel = dateLabel;
+                                    const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
+                                    const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
+                                    const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
+                                    return (
+                                        <React.Fragment key={msg.id}>
+                                            {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
+                                            {showSeparator && <DateSeparator label={dateLabel} />}
+                                            <MessageBubble
+                                                msg={msg}
+                                                currentUser={currentUser}
+                                                isDM={false}
+                                                isConsecutive={isConsecutive}
+                                                onShowInfo={setMessageInfoMsg}
+                                                onPlayNext={handlePlayNext}
+                                                allVisualMedia={allVisualMedia}
+                                                isSelectionMode={isSelectionMode}
+                                                selectedIds={selectedMessageIds}
+                                                onToggleSelect={handleToggleSelect}
+                                                onEnterSelectionMode={handleEnterSelectionMode}
+                                            />
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()}
+                            {/* Bottom anchor — used for scroll-to-bottom */}
+                            <div ref={bottomAnchorRef} className="h-2" />
+                        </div>
+
+                        {/* ── Typing/Recording Indicator (bottom of chat, above footer) ── */}
+                        {(typingUsers.length > 0 || recordingUsers.length > 0) && (
+                            <div className="flex items-end gap-4 px-4 pb-3">
+                                {/* Stacked mini avatars — up to 3 shown */}
+                                <AvatarGroup>
+                                    {(recordingUsers.length > 0 ? recordingUsers : typingUsers).slice(0, 3).map((u) => {
+                                        let displayImage = u.image;
+                                        let displayName = u.displayName ?? u.phone ?? "?";
+
+                                        if (chatType === "directmessage" && directMessage) {
+                                            displayImage = directMessage.direct_message?.image ?? undefined;
+                                            displayName = (directMessage.name as DirectMessageName)?.contact_name ?? displayName;
+                                        } else if (chatType === "groupchat") {
+                                            const member = groupMembers.find(m => m.user?.id === u.id);
+                                            if (member) {
+                                                displayImage = member.user?.profile_pic ?? undefined;
+                                                displayName = member.name || member.user?.display_name || displayName;
+                                            }
+                                        }
+
                                         return (
-                                            <React.Fragment key={msg.id}>
-                                                {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                                {showSeparator && <DateSeparator label={dateLabel} />}
-                                                <MessageBubble
-                                                    msg={msg}
-                                                    currentUser={currentUser}
-                                                    isDM={true}
-                                                    isConsecutive={isConsecutive}
-                                                    onShowInfo={setMessageInfoMsg}
-                                                    onPlayNext={handlePlayNext}
-                                                    allVisualMedia={allVisualMedia}
-                                                />
-                                            </React.Fragment>
-                                        );
-                                    });
-                                })()}
-
-                                {/* group message chats */}
-                                {currentUser && processedGroupMessages.length > 0 && (() => {
-                                    const unreadCount = unreadState.unreadCount;
-                                    const firstUnreadId = unreadState.firstUnreadId;
-                                    let lastDateLabel = "";
-
-                                    return processedGroupMessages.map((msg, index) => {
-                                        const prevMsg = index > 0 ? processedGroupMessages[index - 1] : null;
-                                        const dateLabel = getDateLabel(msg.timestamp, currentUser.timezone);
-                                        const showSeparator = dateLabel !== lastDateLabel;
-                                        if (showSeparator) lastDateLabel = dateLabel;
-                                        const prevMsgUserId = prevMsg ? (typeof prevMsg.user === 'object' && prevMsg.user !== null ? (prevMsg.user as User).id : (prevMsg.user as unknown as string)) : null;
-                                        const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
-                                        const isConsecutive = !showSeparator && prevMsgUserId === msgUserId;
-                                        return (
-                                            <React.Fragment key={msg.id}>
-                                                {msg.id === firstUnreadId && <UnreadBanner count={unreadCount} ref={unreadBannerRef} />}
-                                                {showSeparator && <DateSeparator label={dateLabel} />}
-                                                <MessageBubble
-                                                    msg={msg}
-                                                    currentUser={currentUser}
-                                                    isDM={false}
-                                                    isConsecutive={isConsecutive}
-                                                    onShowInfo={setMessageInfoMsg}
-                                                    onPlayNext={handlePlayNext}
-                                                    allVisualMedia={allVisualMedia}
-                                                />
-                                            </React.Fragment>
-                                        );
-                                    });
-                                })()}
-                                {/* Bottom anchor — used for scroll-to-bottom */}
-                                <div ref={bottomAnchorRef} className="h-2" />
-                            </div>
-
-                            {/* ── Group Typing Indicator (bottom of chat, above footer) ── */}
-                            {groupMessage && typingUsers.length > 0 && (
-                                <div className="flex items-end gap-4 px-4 pb-3">
-                                    {/* Stacked mini avatars — up to 3 shown */}
-                                    <AvatarGroup>
-                                        {typingUsers.slice(0, 3).map((u) => (
                                             <Avatar key={u.id} className="h-8 w-8 border-2 border-[#efeae2]">
-                                                <AvatarImage src={u.image || undefined} />
+                                                <AvatarImage src={displayImage || undefined} />
                                                 <AvatarFallback className="text-[10px] bg-[#dfe5e7]">
-                                                    {(u.displayName ?? u.phone ?? "?").slice(0, 1).toUpperCase()}
+                                                    {displayName.slice(0, 1).toUpperCase()}
                                                 </AvatarFallback>
                                             </Avatar>
-                                        ))}
-                                    </AvatarGroup>
+                                        );
+                                    })}
+                                </AvatarGroup>
 
-                                    {/* Typing bubble with three-dot bounce */}
-                                    <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
-                                        <span className="typing-dot typing-dot-1" />
-                                        <span className="typing-dot typing-dot-2" />
-                                        <span className="typing-dot typing-dot-3" />
-                                    </div>
+                                {/* Bubble */}
+                                <div className="flex items-center gap-1 bubble-received px-3 py-3 shadow-sm">
+                                    {recordingUsers.length > 0 ? (
+                                        <span className="text-[#54656f] text-[13px] flex items-center gap-1">
+                                            <Mic size={14} className="text-[#00a884]" />
+                                        </span>
+                                    ) : (
+                                        <>
+                                            <span className="typing-dot typing-dot-1" />
+                                            <span className="typing-dot typing-dot-2" />
+                                            <span className="typing-dot typing-dot-3" />
+                                        </>
+                                    )}
                                 </div>
-                            )}
+                            </div>
+                        )}
 
-                            {/* ── Input Bar ───────────────────────────────────────── */}
+                        {/* ── Input Bar / Selection Bar ─────────────────────── */}
+                        {isSelectionMode ? (
+                            <footer className="flex items-center justify-between px-4 py-2.5 bg-[#f0f2f5] border-t border-[#d1d7db] animate-in slide-in-from-bottom duration-200">
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={handleExitSelectionMode}
+                                        className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-[#d9dbde] transition-colors cursor-pointer"
+                                    >
+                                        <X size={22} className="text-[#54656f]" />
+                                    </button>
+                                    <span className="text-[15px] text-[#111b21] font-normal">
+                                        {selectedMessageIds.size} selected
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={handleDeleteSelected}
+                                    disabled={selectedMessageIds.size === 0}
+                                    className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#d9dbde] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <Trash2 size={20} className="text-[#54656f]" />
+                                </button>
+                            </footer>
+                        ) : (
                             <footer className="flex items-center px-2 py-2 bg-transparent border-none">
                                 <div className="flex items-center flex-1 bg-white rounded-[24px] px-1.5 py-1 gap-1 shadow-sm min-h-[46px]">
                                     {isRecording ? (
-                                        <VoiceRecorder 
-                                            onStop={handleVoiceRecordingStop} 
+                                        <VoiceRecorder
+                                            onStop={handleVoiceRecordingStop}
                                             onCancel={handleVoiceRecordingCancel}
                                             onDraft={handleVoiceDraft}
+                                            onPause={handleVoiceRecordingPause}
+                                            onResume={handleVoiceRecordingResume}
                                             draftBlob={voiceDraftBlob}
                                             draftDuration={voiceDraftDuration}
                                             draftMimeType={voiceDraftMimeType}
@@ -1194,216 +1647,283 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                     )}
                                 </div>
                             </footer>
+                        )}
 
-                            {/* Hidden Inputs */}
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                className="hidden"
-                                multiple
-                                onChange={handleFileSelect}
+                        {/* Hidden Inputs */}
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            multiple
+                            onChange={handleFileSelect}
+                        />
+                        <input
+                            type="file"
+                            ref={mediaInputRef}
+                            className="hidden"
+                            accept="image/*,video/*"
+                            multiple
+                            onChange={handleMediaSelect}
+                        />
+                        <input
+                            type="file"
+                            ref={audioInputRef}
+                            className="hidden"
+                            accept="audio/*"
+                            multiple
+                            onChange={handleAudioSelect}
+                        />
+
+                        {/* File Upload Preview Overlay (covers messages + footer only) */}
+                        {isPreviewOpen && (
+                            <FileUploadPreview
+                                files={pendingFiles}
+                                onClose={() => {
+                                    setIsPreviewOpen(false);
+                                    setPendingFiles([]);
+                                }}
+                                onSend={handleSendFiles}
+                                onAddMore={() => {
+                                    fileInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveFile}
                             />
-                            <input
-                                type="file"
-                                ref={mediaInputRef}
-                                className="hidden"
-                                accept="image/*,video/*"
-                                multiple
-                                onChange={handleMediaSelect}
+                        )}
+
+                        {/* Photo/Video Editor Preview */}
+                        {isMediaPreviewOpen && (
+                            <PhotoVideoUploadPreview
+                                files={pendingMedia}
+                                onClose={() => {
+                                    setIsMediaPreviewOpen(false);
+                                    setPendingMedia([]);
+                                }}
+                                onSend={handleSendFiles} // Reuse same send logic
+                                onAddMore={() => {
+                                    mediaInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveMediaFile}
                             />
-                            <input
-                                type="file"
-                                ref={audioInputRef}
-                                className="hidden"
-                                accept="audio/*"
-                                multiple
-                                onChange={handleAudioSelect}
+                        )}
+
+                        {/* Audio Editor Preview */}
+                        {isAudioPreviewOpen && (
+                            <AudioUploadPreview
+                                files={pendingAudio}
+                                onClose={() => {
+                                    setIsAudioPreviewOpen(false);
+                                    setPendingAudio([]);
+                                }}
+                                onSend={handleSendFiles}
+                                onAddMore={() => {
+                                    audioInputRef.current?.click();
+                                }}
+                                onRemoveFile={handleRemoveAudioFile}
                             />
+                        )}
 
-                            {/* File Upload Preview Overlay (covers messages + footer only) */}
-                            {isPreviewOpen && (
-                                <FileUploadPreview
-                                    files={pendingFiles}
-                                    onClose={() => {
-                                        setIsPreviewOpen(false);
-                                        setPendingFiles([]);
-                                    }}
-                                    onSend={handleSendFiles}
-                                    onAddMore={() => {
-                                        fileInputRef.current?.click();
-                                    }}
-                                    onRemoveFile={handleRemoveFile}
-                                />
-                            )}
+                        {/* Contact Select Modal */}
+                        {isContactModalOpen && (
+                            <ContactSelectModal
+                                isOpen={isContactModalOpen}
+                                onClose={() => setIsContactModalOpen(false)}
+                                onSend={handleSendContacts}
+                            />
+                        )}
 
-                            {/* Photo/Video Editor Preview */}
-                            {isMediaPreviewOpen && (
-                                <PhotoVideoUploadPreview
-                                    files={pendingMedia}
-                                    onClose={() => {
-                                        setIsMediaPreviewOpen(false);
-                                        setPendingMedia([]);
-                                    }}
-                                    onSend={handleSendFiles} // Reuse same send logic
-                                    onAddMore={() => {
-                                        mediaInputRef.current?.click();
-                                    }}
-                                    onRemoveFile={handleRemoveMediaFile}
-                                />
-                            )}
+                    </div>{/* end relative wrapper */}
+                </div>
 
-                            {/* Audio Editor Preview */}
-                            {isAudioPreviewOpen && (
-                                <AudioUploadPreview
-                                    files={pendingAudio}
-                                    onClose={() => {
-                                        setIsAudioPreviewOpen(false);
-                                        setPendingAudio([]);
-                                    }}
-                                    onSend={handleSendFiles}
-                                    onAddMore={() => {
-                                        audioInputRef.current?.click();
-                                    }}
-                                    onRemoveFile={handleRemoveAudioFile}
-                                />
-                            )}
 
-                            {/* Contact Select Modal */}
-                            {isContactModalOpen && (
-                                <ContactSelectModal
-                                    isOpen={isContactModalOpen}
-                                    onClose={() => setIsContactModalOpen(false)}
-                                    onSend={handleSendContacts}
-                                />
-                            )}
+                {/* ── Side Info Panel (Contact/Message Info) ───────────────────────────── */}
+                {messageInfoMsg ? (
+                    <div className="w-[400px] lg:w-[450px] border-l border-[#d1d7db] bg-white flex flex-col h-full animate-in slide-in-from-right duration-300">
+                        {/* Header */}
+                        <div className="flex items-center gap-6 px-4 py-3 bg-white h-[60px] border-b border-[#f0f2f5]">
+                            <button onClick={() => setMessageInfoMsg(null)} className="text-[#54656f] hover:text-[#111b21] transition-colors">
+                                <X size={24} />
+                            </button>
+                            <h2 className="text-[17px] font-medium text-[#111b21]">Message info</h2>
+                        </div>
 
-                        </div>{/* end relative wrapper */}
-                    </div>
-
-                    {/* ── Side Info Panel (Contact/Message Info) ───────────────────────────── */}
-                    {messageInfoMsg ? (
-                        <div className="w-[400px] lg:w-[450px] border-l border-[#d1d7db] bg-white flex flex-col h-full animate-in slide-in-from-right duration-300">
-                            {/* Header */}
-                            <div className="flex items-center gap-6 px-4 py-3 bg-white h-[60px] border-b border-[#f0f2f5]">
-                                <button onClick={() => setMessageInfoMsg(null)} className="text-[#54656f] hover:text-[#111b21] transition-colors">
-                                    <X size={24} />
-                                </button>
-                                <h2 className="text-[17px] font-medium text-[#111b21]">Message info</h2>
-                            </div>
-
-                            {/* Content Area */}
-                            <div className="flex-1 overflow-y-auto bg-[#efeae2] info-sheet-scrollbar">
-                                {/* Bubble Preview Area with Doodle Background */}
-                                <div className="relative pt-6 pb-4 px-6 doodle-bg flex justify-center items-start chat-bg-doodle min-h-[140px]">
-                                    {/* <div className="absolute inset-0 opacity-10 pointer-events-none" ></div> */}
-                                    <div className={`relative max-w-[85%] ${((typeof messageInfoMsg.user === 'object' ? messageInfoMsg.user.id : messageInfoMsg.user) === currentUser?.id) ? 'bubble-sent' : 'bubble-received'} shadow-sm px-2.5 py-1 z-10`}>
-                                        <div className="flex flex-col min-w-[120px]">
-                                            <p className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap pr-1">{messageInfoMsg.content}</p>
-                                            <div className="flex items-center justify-end gap-1 h-4">
-                                                <span className="text-[11px] text-[#667781] leading-none">
-                                                    {getDateTimeByTimezone(messageInfoMsg.timestamp, currentUser?.timezone || "utc").time}
-                                                </span>
-                                            </div>
+                        {/* Content Area */}
+                        <div className="flex-1 overflow-y-auto bg-[#efeae2] info-sheet-scrollbar">
+                            {/* Bubble Preview Area with Doodle Background */}
+                            <div className="relative pt-6 pb-4 px-6 doodle-bg flex justify-center items-start chat-bg-doodle min-h-[140px]">
+                                {/* <div className="absolute inset-0 opacity-10 pointer-events-none" ></div> */}
+                                <div className={`relative max-w-[85%] ${((typeof messageInfoMsg.user === 'object' ? messageInfoMsg.user.id : messageInfoMsg.user) === currentUser?.id) ? 'bubble-sent' : 'bubble-received'} shadow-sm px-2.5 py-1 z-10`}>
+                                    <div className="flex flex-col min-w-[120px]">
+                                        <p className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap pr-1">{messageInfoMsg.content}</p>
+                                        <div className="flex items-center justify-end gap-1 h-4">
+                                            <span className="text-[11px] text-[#667781] leading-none">
+                                                {getDateTimeByTimezone(messageInfoMsg.timestamp, currentUser?.timezone || "utc").time}
+                                            </span>
                                         </div>
                                     </div>
                                 </div>
+                            </div>
 
-                                {/* Info Sections */}
-                                <div className="bg-white flex flex-col">
-                                    <div className="px-6 py-4 flex items-center gap-2">
-                                        <CheckIcon2_ height={18} width={18} className="text-[#53bdeb]" />
-                                        <span className="text-[14px] text-[#008069] font-medium tracking-wide">Read by</span>
-                                    </div>
-                                    <div className="space-y-0.5 border-t border-[#f0f2f5]">
-                                        {messageReadRecipients && messageReadRecipients.length > 0 && (
-                                            messageReadRecipients.map((recipient) => (
-                                                <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
-                                                    <Avatar className="h-10 w-10">
-                                                        <AvatarImage src={recipient.user.profile_pic} />
-                                                        <AvatarFallback className="text-sm bg-[#dfe5e7]">
-                                                            {recipient.contact_name?.slice(0, 1).toUpperCase() || 'U'}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                    <div className="flex-1 py-2">
-                                                        <div className="flex justify-between items-center">
-                                                            <div className="flex flex-col">
-                                                                <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
-                                                                <span className="text-[12px] text-[#667781]">
-                                                                    {recipient.read_date && formatDatetime(recipient.read_date, currentUser?.timezone || "utc")}
-                                                                </span>
-                                                            </div>
+                            {/* Info Sections */}
+                            <div className="bg-white flex flex-col">
+                                <div className="px-6 py-4 flex items-center gap-2">
+                                    <CheckIcon2_ height={18} width={18} className="text-[#53bdeb]" />
+                                    <span className="text-[14px] text-[#008069] font-medium tracking-wide">Read by</span>
+                                </div>
+                                <div className="space-y-0.5 border-t border-[#f0f2f5]">
+                                    {messageReadRecipients && messageReadRecipients.length > 0 && (
+                                        messageReadRecipients.map((recipient) => (
+                                            <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                <Avatar className="h-10 w-10">
+                                                    <AvatarImage src={recipient.user.profile_pic} />
+                                                    <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                        {recipient.contact_name?.slice(0, 1).toUpperCase() || 'U'}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex-1 py-2">
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                            <span className="text-[12px] text-[#667781]">
+                                                                {recipient.read_date && formatDatetime(recipient.read_date, currentUser?.timezone || "utc")}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </div>
-                                            ))
-                                        )}
-                                    </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
 
-                                    {
-                                        messageDeliveredRecipients && messageDeliveredRecipients.length > 0 && (
-                                            <>
-                                                <div className="px-6 py-4 flex items-center gap-4 mt-2 border-t border-[#f0f2f5]">
-                                                    <CheckIcon2_ height={18} width={18} className="text-[#8696a0]" />
-                                                    <span className="text-[14px] text-[#667781] font-medium tracking-wide">Delivered</span>
-                                                </div>
-                                                <div className="space-y-0.5 border-t">
-                                                    {messageDeliveredRecipients.map((recipient) => (
-                                                        <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
-                                                            <Avatar className="h-10 w-10">
-                                                                <AvatarImage src={recipient.user.profile_pic} />
-                                                                <AvatarFallback className="text-sm bg-[#dfe5e7]">
-                                                                    {recipient.contact_name?.slice(0, 1).toUpperCase() || 'M'}
-                                                                </AvatarFallback>
-                                                            </Avatar>
-                                                            <div className="flex-1 border-b border-[#f0f2f5] py-2">
-                                                                <div className="flex justify-between items-center">
-                                                                    <div className="flex flex-col">
-                                                                        <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
-                                                                        <span className="text-[12px] text-[#667781]">
-                                                                            {recipient.delivered_date && formatDatetime(recipient.delivered_date, currentUser?.timezone || "utc")}
-                                                                        </span>
-                                                                    </div>
+                                {
+                                    messageDeliveredRecipients && messageDeliveredRecipients.length > 0 && (
+                                        <>
+                                            <div className="px-6 py-4 flex items-center gap-4 mt-2 border-t border-[#f0f2f5]">
+                                                <CheckIcon2_ height={18} width={18} className="text-[#8696a0]" />
+                                                <span className="text-[14px] text-[#667781] font-medium tracking-wide">Delivered</span>
+                                            </div>
+                                            <div className="space-y-0.5 border-t">
+                                                {messageDeliveredRecipients.map((recipient) => (
+                                                    <div key={recipient.id} className="px-6 py-3 flex items-center gap-4 hover:bg-[#f5f6f6] cursor-pointer transition-colors group">
+                                                        <Avatar className="h-10 w-10">
+                                                            <AvatarImage src={recipient.user.profile_pic} />
+                                                            <AvatarFallback className="text-sm bg-[#dfe5e7]">
+                                                                {recipient.contact_name?.slice(0, 1).toUpperCase() || 'M'}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div className="flex-1 border-b border-[#f0f2f5] py-2">
+                                                            <div className="flex justify-between items-center">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-[16px] text-[#111b21]">{recipient.contact_name}</span>
+                                                                    <span className="text-[12px] text-[#667781]">
+                                                                        {recipient.delivered_date && formatDatetime(recipient.delivered_date, currentUser?.timezone || "utc")}
+                                                                    </span>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    ))
-                                                    }
-                                                </div>
-                                            </>
-                                        )
-                                    }
+                                                    </div>
+                                                ))
+                                                }
+                                            </div>
+                                        </>
+                                    )
+                                }
 
-                                </div>
                             </div>
                         </div>
-                    ) : isInfoOpen ? (
-                        <ContactInfo
-                            onClose={() => setIsInfoOpen(false)}
-                            directMessageUserInfo={
-                                directMessage && {
-                                    name: directMessage.name as DirectMessageName,
-                                    userId: directMessage.direct_message?.recent_user_id as string,
-                                    image: directMessage.direct_message?.image as string,
-                                    bio: directMessage.direct_message?.bio,
-                                    phone: directMessage.direct_message?.phone,
-                                    groupsInCommon: dmGroupsInCommon,
-                                }
+                    </div>
+                ) : isInfoOpen ? (
+                    <ContactInfo
+                        onClose={() => setIsInfoOpen(false)}
+                        directMessageUserInfo={
+                            directMessage && {
+                                name: directMessage.name as DirectMessageName,
+                                userId: directMessage.direct_message?.recent_user_id as string,
+                                image: directMessage.direct_message?.image as string,
+                                bio: directMessage.direct_message?.bio,
+                                phone: directMessage.direct_message?.phone,
+                                groupsInCommon: dmGroupsInCommon,
                             }
-                            groupMessageInfo={
-                                groupMessage && {
-                                    groupId: chatId,
-                                    groupchat: groupInfo,
-                                    currentUser: currentUser,
-                                    name: groupMessage.name as string,
-                                    image: groupMessage.group_chat?.image as string
-                                }
+                        }
+                        groupMessageInfo={
+                            groupMessage && {
+                                groupId: chatId,
+                                groupchat: groupInfo,
+                                currentUser: currentUser,
+                                name: groupMessage.name as string,
+                                image: groupMessage.group_chat?.image as string
                             }
-                            groupMembers={groupMembers}
-                        />
-                    ) : null}
-                </div>
-            </SidebarInset>
-        </MediaViewerProvider>
+                        }
+                        groupMembers={groupMembers}
+                    />
+                ) : null}
+            </div>
+
+            {/* ── Delete Confirmation Dialog ─────────────────────────────── */}
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent className="w-[450px] rounded-[16px] p-0 border-none shadow-2xl bg-white overflow-hidden animate-in fade-in zoom-in duration-200">
+                    <AlertDialogHeader className="px-6 pt-6 pb-2">
+                        <AlertDialogTitle className="text-[19px] font-medium text-[#111b21] tracking-tight">
+                            Delete message{selectedMessageIds.size > 1 ? 's' : ''}?
+                        </AlertDialogTitle>
+                    </AlertDialogHeader>
+
+                    <div className="flex flex-col items-end gap-2.5 px-6 pb-6 pt-2 w-full">
+                        {canDeleteForEveryone && (
+                            <button
+                                onClick={confirmDeleteForEveryone}
+                                className="w-auto min-w-[140px] px-6 py-2.5 bg-white hover:bg-[#eaf7f2] text-[#008069] text-[15px] font-medium rounded-full border border-[#008069]/10 transition-colors cursor-pointer"
+                            >
+                                Delete for everyone
+                            </button>
+                        )}
+                        <button
+                            onClick={confirmDeleteForMe}
+                            className="w-auto min-w-[140px] px-6 py-2.5 bg-white hover:bg-[#eaf7f2] text-[#008069] text-[15px] font-medium rounded-full border border-[#d1d7db] transition-colors cursor-pointer"
+                        >
+                            Delete for me
+                        </button>
+                        <button
+                            onClick={() => setIsDeleteDialogOpen(false)}
+                            className="w-auto min-w-[140px] px-6 py-2.5 bg-white hover:bg-[#eaf7f2] text-[#008069] text-[15px] font-medium rounded-full border border-[#d1d7db] transition-colors cursor-pointer"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={isFileDeleteDialogOpen} onOpenChange={setIsFileDeleteDialogOpen}>
+                <AlertDialogContent className="max-w-[400px] rounded-0 p-6 flex flex-col gap-4">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="text-[14px] text-[#54656f] font-normal leading-relaxed">
+                            {canDeleteFileForEveryone ? "Delete file?" : "Delete file?"}
+                        </AlertDialogTitle>
+                    </AlertDialogHeader>
+                    <div className="flex flex-col gap-1 items-end pt-2">
+                        {canDeleteFileForEveryone && (
+                            <button
+                                onClick={confirmDeleteFileForEveryone}
+                                className="w-full text-left px-4 py-2 text-[14px] text-[#d33a39] hover:bg-gray-100 transition-colors uppercase font-medium"
+                            >
+                                Delete for Everyone
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setIsFileDeleteDialogOpen(false)}
+                            className="w-full text-left px-4 py-2 text-[14px] text-[#00a884] hover:bg-gray-100 transition-colors uppercase font-medium"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={confirmDeleteFileForMe}
+                            className="w-full text-left px-4 py-2 text-[14px] text-[#00a884] hover:bg-gray-100 transition-colors uppercase font-medium"
+                        >
+                            Delete for Me
+                        </button>
+                    </div>
+                </AlertDialogContent>
+            </AlertDialog>
+        </SidebarInset>
     );
 };
 

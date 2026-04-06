@@ -2,9 +2,6 @@ import React, { useState, useRef, useEffect, memo, useMemo } from 'react'
 import { Play, Pause, Loader2, Mic, Upload, Download, X } from 'lucide-react'
 import { MediaFile } from '@/types/mediaTypes'
 import { cn, formatDuration } from '@/lib/utils'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '@/lib/indexdb'
-import { useUserStore } from '@/lib/providers/user-store-provider'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { toast } from "sonner"
 
@@ -75,28 +72,11 @@ function VoiceMessageComp({
   receipt,
   chatId,
   isDM,
-  senderAvatar: propSenderAvatar,
-  senderName: propSenderName
+  senderAvatar,
+  senderName,
 }: VoiceMessageProps) {
-  const currentUser = useUserStore((state) => state.user)
   const activeAudioId = useVoicePlaybackStore((s) => s.activeAudioId)
   const setActiveAudioId = useVoicePlaybackStore((s) => s.setActiveAudioId)
-
-  // Fetch chat info for fallback naming/avatar specifically for DMs
-  const chatInfo = useLiveQuery(async () => {
-    if (!chatId || isMine || !isDM) return null;
-    return await db.chatlist.filter(chat => chat.direct_message?.id === chatId).first();
-  }, [chatId, isMine, isDM]);
-
-  const senderAvatar = propSenderAvatar || (isMine
-    ? currentUser?.profile_pic
-    : chatInfo?.direct_message?.image);
-
-  const otherSenderName = !chatInfo?.direct_message?.name?.contact_name.startsWith("+") ? chatInfo?.direct_message?.name?.contact_name : chatInfo?.direct_message?.name?.display_name
-
-  const senderName = propSenderName || (isMine
-    ? currentUser?.display_name
-    : otherSenderName)
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -253,7 +233,7 @@ function VoiceMessageComp({
     )}>
       {/* Hidden Audio Element */}
       {audioUrl && isReady && (
-        <audio
+      <audio
           ref={audioRef}
           src={audioUrl}
           preload="auto"
@@ -403,14 +383,11 @@ export default memo(VoiceMessageComp, (prev, next) => {
   return (
     prev.file?.file_id === next.file?.file_id &&
     prev.file?.status === next.file?.status &&
-    prev.file?.progress === next.file?.progress &&
-    prev.file?.media_url === next.file?.media_url &&
     prev.voice_message === next.voice_message &&
     prev.voice_message_duration === next.voice_message_duration &&
     prev.status === next.status &&
     prev.timestamp === next.timestamp &&
     prev.isMine === next.isMine &&
-    prev.receipt === next.receipt &&
     prev.senderAvatar === next.senderAvatar &&
     prev.senderName === next.senderName &&
     prev.id === next.id

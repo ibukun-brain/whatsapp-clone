@@ -1,5 +1,12 @@
 import { MediaFile, MediaStatus } from "./mediaTypes";
 
+export type DeletedInfo = {
+  message_id?: string;
+  file_id?: string;
+  delete_type: "for_me" | "for_everyone";
+  deleted_by: string;
+}
+
 export type User = {
   id: string;
   display_name: string;
@@ -50,6 +57,7 @@ export type DirectMessage = {
   }
   recent_voice_message?: string;
   recent_voice_message_duration?: string;
+  recent_deleted?: DeletedInfo
 }
 
 export type GroupChat = {
@@ -67,7 +75,7 @@ export type GroupChat = {
   online_users?: number;
   recent_voice_message?: string;
   recent_voice_message_duration?: string;
-  // Add other group chat properties as needed
+  recent_deleted?: DeletedInfo
 }
 
 export type GroupChatSettings = {
@@ -138,7 +146,6 @@ export type DirectMessageChats = {
   read_date?: Date;
   forwarded: boolean;
   edited: boolean;
-  deleted: boolean;
   timestamp: Date;
   isOptimistic?: boolean;
   client_msg_id?: string;
@@ -150,6 +157,11 @@ export type DirectMessageChats = {
   voice_message_file_id?: string;
   uploadStatus?: MediaStatus;
   attachments?: Attachment[];
+  deleted?: {
+    message_id: string,
+    delete_type: "for_me" | "for_everyone",
+    deleted_by: string
+  }
 }
 
 export type DMGroupsInCommon = Omit<GroupChat, "bio" | "created_at" | "settings"> & {
@@ -180,7 +192,6 @@ export type GroupMessageChats = {
   depth: number | null;
   forwarded: boolean;
   edited: boolean;
-  deleted: boolean;
   timestamp: Date;
   receipt: "sent" | "delivered" | "read" | "failed";
   status?: 'pending' | 'sent' | 'failed' | 'processing' | 'uploading';
@@ -193,6 +204,11 @@ export type GroupMessageChats = {
   voice_message_file_id?: string;
   uploadStatus?: import("./mediaTypes").MediaStatus;
   attachments?: Attachment[];
+  deleted?: {
+    message_id: string,
+    delete_type: "for_me" | "for_everyone",
+    deleted_by: string
+  }
 }
 
 export type GroupMessageChatRecipients = {

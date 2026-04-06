@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Mic, Trash2, Pause, Play } from "lucide-react";
 import { SendIcon } from "@/components/icons/chats-icon";
 import { toast } from "sonner";
+import { fixWebmDuration } from '@fix-webm-duration/fix';
 
 interface VoiceRecorderProps {
     onStop: (file: File, duration: number) => void;
@@ -13,6 +14,8 @@ interface VoiceRecorderProps {
     draftBlob?: Blob;
     draftDuration?: number;
     draftMimeType?: string;
+    onPause?: () => void;
+    onResume?: () => void;
 }
 
 const DottedLineStyles = () => (
@@ -37,7 +40,7 @@ const DottedLineStyles = () => (
     `}</style>
 );
 
-export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDuration, draftMimeType }: VoiceRecorderProps) => {
+export const VoiceRecorder = ({ onStop, onCancel, onDraft, onPause, onResume, draftBlob, draftDuration, draftMimeType }: VoiceRecorderProps) => {
     const [isPaused, setIsPaused] = useState(!!draftBlob);
     const [isPlaying, setIsPlaying] = useState(false);
     const [duration, setDuration] = useState(draftDuration || 0);
@@ -158,21 +161,6 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
             recorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
                     chunksRef.current.push(e.data);
-                    
-                    // If we requested data for a preview (e.g. during pause)
-                    if (isWaitingForPreviewRef.current) {
-                        isWaitingForPreviewRef.current = false;
-                        const mimeType = getMimeType();
-                        const previewBlob = new Blob(chunksRef.current, { type: mimeType });
-                        const url = URL.createObjectURL(previewBlob);
-                        setAudioUrl(prev => {
-                            if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
-                            return url;
-                        });
-
-                        // Notify parent so it can keep the draft updated
-                        onDraft?.(previewBlob, durationRef.current, mimeType);
-                    }
                 }
             };
 
@@ -207,27 +195,39 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         if (timerRef.current) clearInterval(timerRef.current);
     };
 
-    const handleStop = () => {
+    const handleStop = async () => {
         isCancelledRef.current = false;
         isSentRef.current = true;
 
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.onstop = () => {
-                finalizeRecording();
-            };
-            mediaRecorderRef.current.stop();
+            await new Promise<void>((resolve) => {
+                mediaRecorderRef.current!.onstop = async () => {
+                    await finalizeRecording();
+                    resolve();
+                };
+                mediaRecorderRef.current!.stop();
+            });
         } else {
-            finalizeRecording();
+            await finalizeRecording();
         }
     };
 
-    const finalizeRecording = () => {
+    const finalizeRecording = async () => {
         const mimeType = getMimeType();
         const extension = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'm4a';
         
         if (chunksRef.current.length > 0) {
-            const finalBlob = new Blob(chunksRef.current, { type: mimeType });
-            if (finalBlob.size > 0) {
+            const rawBlob = new Blob(chunksRef.current, { type: mimeType });
+            if (rawBlob.size > 0) {
+                let finalBlob: Blob = rawBlob;
+                // Fix WebM duration metadata (browsers don't set it correctly)
+                if (mimeType.includes('webm')) {
+                    try {
+                        finalBlob = await fixWebmDuration(rawBlob, durationRef.current * 1000);
+                    } catch (e) {
+                        console.warn('Failed to fix WebM duration, using raw blob:', e);
+                    }
+                }
                 const file = new File([finalBlob], `voice-${Date.now()}.${extension}`, { type: mimeType });
                 onStop(file, durationRef.current);
             }
@@ -243,8 +243,6 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         cleanup();
         onCancel();
     };
-
-    const isWaitingForPreviewRef = useRef(false);
 
     const togglePause = () => {
         if (isPaused) {
@@ -262,15 +260,26 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
                 startRecording(true);
             }
             startTimer();
+            onResume?.();
         } else {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                // Request data so we can update the preview URL, but keep the session alive
-                isWaitingForPreviewRef.current = true;
-                mediaRecorderRef.current.requestData();
+                // Pause first to keep the session alive, then flush the current chunk
                 mediaRecorderRef.current.pause();
+                mediaRecorderRef.current.requestData();
+
+                // Build preview blob from existing chunks
+                const mimeType = getMimeType();
+                const previewBlob = new Blob(chunksRef.current, { type: mimeType });
+                const url = URL.createObjectURL(previewBlob);
+                setAudioUrl(prev => {
+                    if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                    return url;
+                });
+                onDraft?.(previewBlob, durationRef.current, mimeType);
             }
             stopTimer();
             setIsPaused(true);
+            onPause?.();
         }
     };
 
@@ -288,6 +297,7 @@ export const VoiceRecorder = ({ onStop, onCancel, onDraft, draftBlob, draftDurat
         }
         
         await startRecording(true);
+        onResume?.();
     };
 
     const handlePlayPausePlayback = async () => {

@@ -28,6 +28,8 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
     const setSendMessage = useGlobalWsStore((s) => s.setSendMessage);
     const setUserTyping = useTypingStore((s) => s.setUserTyping);
     const setGroupTyping = useTypingStore((s) => s.setGroupTyping);
+    const setUserRecording = useTypingStore((s) => s.setUserRecording);
+    const setGroupRecording = useTypingStore((s) => s.setGroupRecording);
 
     const currentUser = useLiveQuery(
         async () => await db.user.toCollection().first()
@@ -43,6 +45,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
         if (!lastJsonMessage) return;
         const msg = lastJsonMessage as {
             type?: string;
+            action?: string;
             data?: {
                 user?: {
                     "id": string,
@@ -59,13 +62,16 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                 direct_message_id?: string,
                 groupchat_id?: string,
                 read_date?: Date,
-                message?: DirectMessageChats | GroupMessageChats
+                message?: DirectMessageChats | GroupMessageChats | any
                 dm_delivery_broadcast?: {
                     "direct_message_id": string,
                     "delivered_date": Date,
                 }[],
                 recipients: GroupMessageChatRecipients[]
                 updated_recipients: GroupMessageChatRecipients[]
+                deleted?: any;
+                files?: any[];
+                [key: string]: any;
             };
             chat?: Chat; // Handle cases where chat is at root
             // Typing indicator fields
@@ -74,6 +80,9 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             isTyping?: boolean;
             userTypingId?: string;       // directmessage
             userTyping?: userTypingType[]; // groupchat
+            isRecording?: boolean;
+            userRecordingId?: string;       // directmessage
+            userRecording?: userTypingType[]; // groupchat
         };
 
         if (msg.type === "message_delivery_broadcast") {
@@ -470,11 +479,23 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         if (chat) {
                             if (existing) {
                                 console.log('Updating existing direct message:', directChatMessage.id);
+                                
+                                // Merge files: preserve local blob URLs for existing files, 
+                                // but update their properties (like 'deleted') from the server.
+                                const mergedFiles = (directChatMessage.files || []).map(newFile => {
+                                    const oldFile = existing.files?.find(f => f.file_id === newFile.file_id);
+                                    return {
+                                        ...newFile,
+                                        media_url: oldFile?.media_url || newFile.media_url,
+                                        preview_url: oldFile?.preview_url || newFile.preview_url,
+                                        file_blob: oldFile?.file_blob || newFile.file_blob,
+                                    };
+                                });
+
                                 await db.directmessagechats.put({
                                     ...existing,
                                     ...directChatMessage,
-                                    // Preserve local files (with URLs) if handleMediaReady already processed them
-                                    files: existing.files && existing.files.length > 0 ? existing.files : directChatMessage.files,
+                                    files: mergedFiles,
                                     isOptimistic: false,
                                 });
                             } else {
@@ -510,11 +531,22 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         if (chat) {
                             if (existing) {
                                 console.log('Updating existing group message:', groupChatMessage.id);
+
+                                // Merge files logic
+                                const mergedFiles = (groupChatMessage.files || []).map(newFile => {
+                                    const oldFile = existing.files?.find(f => f.file_id === newFile.file_id);
+                                    return {
+                                        ...newFile,
+                                        media_url: oldFile?.media_url || newFile.media_url,
+                                        preview_url: oldFile?.preview_url || newFile.preview_url,
+                                        file_blob: oldFile?.file_blob || newFile.file_blob,
+                                    };
+                                });
+
                                 await db.groupmessagechats.put({
                                     ...existing,
                                     ...groupChatMessage,
-                                    // Preserve local files (with URLs) if handleMediaReady already processed them
-                                    files: existing.files && existing.files.length > 0 ? existing.files : groupChatMessage.files,
+                                    files: mergedFiles,
                                     isOptimistic: false,
                                 });
                             } else {
@@ -527,9 +559,32 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                     console.error("Failed to update message via WS", error);
                 }
             }
-            updateMessage();
             return;
+        }
 
+        // ── Deletion handler ──────────────────────────────────────────
+        if (msg.type === "handle_user_chatlist_update" && msg.action === "delete") {
+            const updateDeletion = async () => {
+                try {
+                    const messageId = msg.data?.message?.id || msg.data?.direct_message_id || msg.data?.groupchat_id;
+                    if (!messageId) return;
+
+                    const isDM = !!msg.data?.direct_message_id;
+                    const table = isDM ? db.directmessagechats : db.groupmessagechats;
+                    
+                    const existing = await table.get(messageId);
+                    if (existing) {
+                        await table.update(messageId, {
+                            deleted: msg.data?.message?.deleted || msg.data?.deleted,
+                            files: msg.data?.message?.files || msg.data?.files || existing.files
+                        });
+                    }
+                } catch (error) {
+                    console.error("Failed to process deletion via WS", error);
+                }
+            };
+            updateDeletion();
+            return;
         }
 
         // ── Typing indicator ────────────────────────────────────────────
@@ -550,7 +605,25 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             }
             return;
         }
-    }, [lastJsonMessage, setUserTyping, setGroupTyping]);
+        // ── Recording indicator ────────────────────────────────────────────
+        if (msg.chatId && typeof msg.isRecording === "boolean") {
+            if (msg.type === "recording" && msg.chatType === "groupchat" && msg.userRecording != null) {
+                // Use the latest value from the live query without triggering effects
+                db.user.toCollection().first().then(user => {
+                    const withoutSelf = msg.userRecording!.filter(
+                        (u) => !(user && u.id === user.id)
+                    );
+                    setGroupRecording(msg.chatId!, withoutSelf);
+                });
+            } else if (msg.chatType === "directmessage" && msg.userRecordingId != null) {
+                db.user.toCollection().first().then(user => {
+                    if (user && msg.userRecordingId === user.id) return;
+                    setUserRecording(msg.chatId!, msg.userRecordingId!, msg.isRecording!);
+                });
+            }
+            return;
+        }
+    }, [lastJsonMessage, setUserTyping, setGroupTyping, setUserRecording, setGroupRecording]);
 
     return <>{children}</>;
 }
