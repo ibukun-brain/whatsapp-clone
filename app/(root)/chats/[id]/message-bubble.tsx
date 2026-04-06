@@ -64,7 +64,12 @@ const ReadReceipt = ({
         return <AlertCircle className="h-3 w-3 text-red-500" />;
     }
 
-    // 3. Status-based logic (even if optimistic)
+    // 3. Fallback for initial pending state
+    if (isOptimistic || status === 'pending') {
+        return <Clock className="h-3 w-3 text-[#8696a0]" />;
+    }
+
+    // 4. Status-based logic (confirmed states)
     if (read_date || receipt === "read") {
         return <CheckIcon2 height={18} width={18} className="text-[#53bdeb]" />;
     }
@@ -78,11 +83,6 @@ const ReadReceipt = ({
 
     if (isSent) {
         return <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />;
-    }
-
-    // Fallback for initial pending state
-    if (isOptimistic || status === 'pending') {
-        return <Clock className="h-3 w-3 text-[#8696a0]" />;
     }
 
     return <CheckIcon1 height={18} width={14} className="text-[#8696a0]" />;
@@ -208,9 +208,9 @@ const MessageBubble = ({
             return {
                 fileId: f.file_id,
                 element: (
-                    <MessageContextMenu 
-                        key={f.file_id} 
-                        minimal 
+                    <MessageContextMenu
+                        key={f.file_id}
+                        minimal
                         rowId={`${msg.id}:${f.file_id}`}
                         msg={msg}
                         isMine={isMine}
@@ -277,7 +277,7 @@ const MessageBubble = ({
         allRowsContent.push({
             id: msg.id,
             content: (
-                <MessageContextMenu 
+                <MessageContextMenu
                     minimal={!!deletedText}
                     rowId={msg.id}
                     msg={msg}
@@ -339,8 +339,8 @@ const MessageBubble = ({
 
                                 {msg.content && (
                                     <p className={cn(
-                                        `text-[14.5px] ${textColor} leading-normal whitespace-pre-wrap`,
-                                        isDM ? "pt-1.5" : "pr-1"
+                                        `text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap`,
+                                        isDM ? "pt-2.5" : "pr-1"
                                     )}>
                                         {msg.content}
                                     </p>
@@ -352,7 +352,7 @@ const MessageBubble = ({
                                             <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform"><AlertCircle className="h-4 w-4 text-red-500" /></button>
                                         )}
                                         <span className={`text-[11px] ${metaColor} leading-none`}>{time}</span>
-                                        {isMine && (isDM ? <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
+                                        {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
                                     </div>
                                 )}
                             </div>

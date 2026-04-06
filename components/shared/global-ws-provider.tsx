@@ -559,6 +559,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                     console.error("Failed to update message via WS", error);
                 }
             }
+            updateMessage();
             return;
         }
 
