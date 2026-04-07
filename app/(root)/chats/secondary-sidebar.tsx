@@ -55,7 +55,7 @@ import { chatCategories } from "@/lib/utils";
 import { db } from "@/lib/indexdb";
 import { axiosInstance } from "@/lib/axios";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
-import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults, DirectMessage, GroupChat } from "@/types";
+import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults, DirectMessageChats, GroupMessageChats } from "@/types";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
 import { useTypingStore, type userTypingType } from "@/lib/stores/typing-store";
@@ -94,9 +94,7 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
   const isDeletedForEveryone =
     deleted?.delete_type === "for_everyone" ||
     (!content && files && files.length > 0 && files.every((f) => f.deleted?.delete_type === "for_everyone"));
-  const isDeletedForMe =
-    (deleted?.delete_type === "for_me" && deleted?.deleted_by === currentUserId) ||
-    (!content && files && files.length > 0 && visibleFiles.length === 0 && !isDeletedForEveryone);
+
 
   const latestFileId = files && files.length > 0 ? files[files.length - 1].file_id : null;
   const isLatestFileDeleted = !!(deleted?.file_id && deleted.file_id === latestFileId);
@@ -110,7 +108,9 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
     (!content && files && files.length > 0 && visibleFiles.length === 0);
 
   // Deletion logic for recent content
-  if (showDeletedPlaceholder && (isDeletedForEveryone || isDeletedForMe)) {
+  // if delete_type is 'for_me', we don't show the placeholder here, 
+  // as the sidebar should show the previous message instead.
+  if (showDeletedPlaceholder && isDeletedForEveryone) {
     const deletedByMe =
       deleted?.deleted_by === currentUserId ||
       (files && files.some((f) => f.deleted?.deleted_by === currentUserId));
@@ -127,9 +127,11 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
   const voiceMessage = chat.direct_message?.recent_voice_message || chat.group_chat?.recent_voice_message;
   const voiceDuration = chat.direct_message?.recent_voice_message_duration || chat.group_chat?.recent_voice_message_duration;
 
+  const isMessageDeleted = showDeletedPlaceholder;
+
   // Receipt logic
   const renderReceipt = () => {
-    if (!isMine) return null;
+    if (!isMine || isMessageDeleted) return null;
     if (chat.direct_message) {
       return (
         <span className="shrink-0 -mt-0.5">
@@ -156,10 +158,11 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
     );
   };
 
-  const senderPrefix =
-    !isMine && chat.group_chat?.recent_user_display_name ? (
+  const senderPrefix = isMessageDeleted
+    ? null
+    : !isMine && chat.group_chat?.recent_user_display_name ? (
       <span>{chat.group_chat.recent_user_display_name}:{" "}</span>
-    ) : isMine && chat.group_chat ? (
+    ) : isMine && !chat.group_chat ? (
       <span>You:{" "}</span>
     ) : null;
 
@@ -356,6 +359,9 @@ export const SecondarySidebar = () => {
 
   const chatlist = useLiveQuery(
     async () => {
+      const currentUser = await db.user.toCollection().first();
+      const currentUserId = currentUser?.id;
+
       // 1. Fetch all chats that have a draft (ensures they jump to top even if old)
       const draftChats = await db.chatlist.filter(c => !!c.draft?.text).toArray();
       const draftIds = new Set(draftChats.map(c => c.id));
@@ -397,21 +403,71 @@ export const SecondarySidebar = () => {
       });
 
       // 5. Enhance with latest message info (join with message tables)
+      // We search for the most recent message that is NOT deleted for the current user.
       for (const chat of result) {
-        const lastMsgId = chat.direct_message?.recent_content_id || chat.group_chat?.recent_content_id;
-        if (lastMsgId) {
-          const lastMsg = chat.group_chat
-            ? await db.groupmessagechats.get(lastMsgId)
-            : await db.directmessagechats.get(lastMsgId);
+        const directMessageId = chat.direct_message?.id;
+        const groupChatId = chat.group_chat?.id;
 
-          if (lastMsg) {
-            if (chat.direct_message) {
-              chat.direct_message.recent_files = lastMsg.files;
-              chat.direct_message.recent_message_type = lastMsg.type;
-            } else if (chat.group_chat) {
-              chat.group_chat.recent_files = lastMsg.files;
-              chat.group_chat.recent_message_type = lastMsg.type;
-            }
+        const messages = groupChatId
+          ? await db.groupmessagechats
+            .where("groupchat_id")
+            .equals(groupChatId)
+            .sortBy("timestamp")
+          : directMessageId
+            ? await db.directmessagechats
+              .where("direct_message_id")
+              .equals(directMessageId)
+              .sortBy("timestamp")
+            : [];
+
+        const latestMsg = messages.reverse().find((m) => {
+          if (m.deleted?.delete_type === "for_me") return false;
+          // If all files are deleted for me and there's no text content
+          if (!m.content && m.files && m.files.length > 0) {
+            const visible = m.files.filter(f => !f.deleted || f.deleted.delete_type !== "for_me");
+            if (visible.length === 0) return false;
+          }
+          return true;
+        });
+
+        if (latestMsg) {
+          if (chat.direct_message) {
+            const dm = latestMsg as DirectMessageChats;
+            chat.direct_message.recent_content = dm.content;
+            chat.direct_message.recent_files = dm.files;
+            chat.direct_message.recent_message_type = dm.type;
+            chat.direct_message.recent_deleted = dm.deleted;
+            chat.direct_message.recent_user_id = dm.user as string;
+            chat.direct_message.delivered_date = dm.delivered_date || null;
+            chat.direct_message.read_date = dm.read_date || null;
+            chat.direct_message.recent_voice_message = dm.voice_message;
+            chat.direct_message.recent_voice_message_duration = dm.voice_message_duration;
+          } else if (chat.group_chat) {
+            const gm = latestMsg as GroupMessageChats;
+            chat.group_chat.recent_content = gm.content;
+            chat.group_chat.recent_files = gm.files;
+            chat.group_chat.recent_message_type = gm.type;
+            chat.group_chat.recent_deleted = gm.deleted;
+            chat.group_chat.recent_user_id = gm.user.id;
+            chat.group_chat.recent_user_display_name = gm.user.display_name;
+            chat.group_chat.receipt = gm.receipt;
+            chat.group_chat.recent_voice_message = gm.voice_message;
+            chat.group_chat.recent_voice_message_duration = gm.voice_message_duration;
+          }
+        } else {
+          // If no visible messages remain, clear the preview
+          if (chat.direct_message) {
+            chat.direct_message.recent_content = "";
+            chat.direct_message.recent_files = [];
+            chat.direct_message.recent_message_type = undefined;
+            // chat.direct_message.recent_deleted = undefined;
+            chat.direct_message.recent_voice_message = undefined;
+          } else if (chat.group_chat) {
+            chat.group_chat.recent_content = "";
+            chat.group_chat.recent_files = [];
+            chat.group_chat.recent_message_type = undefined;
+            // chat.group_chat.recent_deleted = undefined;
+            chat.group_chat.recent_voice_message = undefined;
           }
         }
       }

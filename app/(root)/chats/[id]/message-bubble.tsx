@@ -101,7 +101,7 @@ const MessageBubble = ({
     selectedIds = new Set(),
     onToggleSelect,
     onEnterSelectionMode,
-    onDeleteFile,
+    onMediaViewerDeleteRequest,
     peerAvatar,
     peerName
 }: {
@@ -117,7 +117,7 @@ const MessageBubble = ({
     selectedIds?: Set<string>,
     onToggleSelect?: (id: string) => void,
     onEnterSelectionMode?: (msgId: string) => void,
-    onDeleteFile?: (file: MediaFile) => void,
+    onMediaViewerDeleteRequest?: (msgId: string, files: MediaFile[]) => void,
     peerAvatar?: string | null,
     peerName?: string | null,
 }) => {
@@ -311,7 +311,11 @@ const MessageBubble = ({
                                             messageStatus={messageStatusKey}
                                             allVisualMedia={allVisualMedia}
                                             currentUserId={currentUser.id}
-                                            onDeleteFile={onDeleteFile}
+                                            onViewerDeleteRequest={(files) => onMediaViewerDeleteRequest?.(msg.id, files)}
+                                            isSelectionMode={isSelectionMode}
+                                            selectedIds={selectedIds}
+                                            onToggleSelect={onToggleSelect}
+                                            msgId={msg.id}
                                         />
                                     </div>
                                 )}
@@ -338,16 +342,13 @@ const MessageBubble = ({
                                 )}
 
                                 {msg.content && (
-                                    <p className={cn(
-                                        `text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap`,
-                                        isDM ? "pt-2.5" : "pr-1"
-                                    )}>
+                                    <p className={`text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap pt-2.5`}>
                                         {msg.content}
                                     </p>
                                 )}
 
                                 {(!hasVisuals || msg.content) && (
-                                    <div className={cn("flex items-center justify-end gap-1 mt-auto", !isDM && "mt-0.5 -mb-0.5 pb-1.5")}>
+                                    <div className={"flex items-center justify-end gap-1 mt-auto"}>
                                         {(msg as any).receipt === 'failed' && (
                                             <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform"><AlertCircle className="h-4 w-4 text-red-500" /></button>
                                         )}
@@ -376,7 +377,7 @@ const MessageBubble = ({
         <div className="flex flex-col">
             {allRowsContent.map((row, idx) => {
                 const isFirstRow = idx === 0;
-                const rowIsSelected = selectedIds.has(row.id);
+                let rowIsSelected = selectedIds.has(row.id);
 
                 if (isSelectionMode) {
                     return (

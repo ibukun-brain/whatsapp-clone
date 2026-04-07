@@ -17,6 +17,7 @@ import { db } from "@/lib/indexdb";
 import { formatDatetime, getDateLabel, getDateTimeByTimezone, formatDuration } from "@/lib/utils";
 import ChatHeader from "./chat-header";
 import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat, GroupMessageChatRecipients, WSData } from "@/types";
+import { MediaFile } from "@/types/mediaTypes";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
 import { axiosInstance } from "@/lib/axios";
@@ -37,6 +38,7 @@ import { useMediaUpload } from "@/hooks/use-media-upload";
 
 import {
     AlertDialog,
+    AlertDialogDescription,
     AlertDialogContent,
     AlertDialogHeader,
     AlertDialogTitle,
@@ -393,13 +395,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     }, []);
 
     const handleToggleSelect = useCallback((msgId: string) => {
+        const idsToToggle = [msgId];
+
         setSelectedMessageIds(prev => {
             const next = new Set(prev);
-            if (next.has(msgId)) {
-                next.delete(msgId);
+            const allSelected = idsToToggle.every(i => next.has(i));
+
+            if (allSelected) {
+                idsToToggle.forEach(i => next.delete(i));
             } else {
-                next.add(msgId);
+                idsToToggle.forEach(i => next.add(i));
             }
+
             if (next.size === 0) {
                 setIsSelectionMode(false);
             }
@@ -427,6 +434,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 const [mId, fId] = id.split(":");
                 return { message_id: mId, file_id: fId };
             });
+
 
         // ── Optimistic DB updates ──────────────────────────────────────
         const isDM = chatType === "directmessage";
@@ -486,7 +494,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     delete_type: "for_me",
                     user_ids: [currentUser.id],
                     message_ids: messageIds,
-                    file_selections: fileSelections
+                    file_selections: fileSelections.map(fs => fs.file_id)
                 }
             }
         });
@@ -499,7 +507,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (!currentUser) return;
 
         const selectedArr = Array.from(selectedMessageIds);
+
         const messageIds = selectedArr.filter(id => !id.includes(":"));
+
         const fileSelections = selectedArr
             .filter(id => id.includes(":"))
             .map(id => {
@@ -588,12 +598,21 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (selectedMessageIds.size === 0) return false;
         const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
         return Array.from(selectedMessageIds).every(id => {
-            const msg = messages.find(m => m.id === id);
+            const msgId = id.includes(":") ? id.split(":")[0] : id;
+            const msg = messages.find(m => m.id === msgId);
             if (!msg) return false;
             const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
             return msgUserId === currentUser?.id;
         });
     }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, chatType]);
+
+    const handleMediaViewerDeleteRequest = useCallback((msgId: string, files: MediaFile[]) => {
+        const newSelection = new Set<string>();
+        files.forEach(f => newSelection.add(`${msgId}:${f.file_id}`));
+        setSelectedMessageIds(newSelection);
+        setIsSelectionMode(true);
+        setIsDeleteDialogOpen(true);
+    }, []);
 
     // Reset selection mode when switching chats
     React.useEffect(() => {
@@ -1385,6 +1404,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 selectedIds={selectedMessageIds}
                                                 onToggleSelect={handleToggleSelect}
                                                 onEnterSelectionMode={handleEnterSelectionMode}
+                                                onMediaViewerDeleteRequest={handleMediaViewerDeleteRequest}
                                                 peerAvatar={directMessage?.direct_message?.image}
                                                 peerName={!directMessage?.direct_message?.name?.contact_name.startsWith("+")
                                                     ? directMessage?.direct_message?.name?.contact_name
@@ -1425,6 +1445,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 selectedIds={selectedMessageIds}
                                                 onToggleSelect={handleToggleSelect}
                                                 onEnterSelectionMode={handleEnterSelectionMode}
+                                                onMediaViewerDeleteRequest={handleMediaViewerDeleteRequest}
                                             />
                                         </React.Fragment>
                                     );
@@ -1875,6 +1896,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         <AlertDialogTitle className="text-[19px] font-medium text-[#111b21] tracking-tight">
                             Delete message{selectedMessageIds.size > 1 ? 's' : ''}?
                         </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {/* This action cannot be undone. This will permanently delete your account
+                            from our servers. */}
+                        </AlertDialogDescription>
                     </AlertDialogHeader>
 
                     <div className="flex flex-col items-end gap-2.5 px-6 pb-6 pt-2 w-full">

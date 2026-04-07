@@ -64,7 +64,7 @@ export type GroupChat = {
   id: string;
   name: string;
   image: string | null;
-  receipt: "sent" | "delivered" | "read",
+  receipt: "sent" | "delivered" | "read" | "failed",
   recent_user_id: string;
   recent_user_display_name: string;
   recent_content: string;

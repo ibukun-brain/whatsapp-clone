@@ -33,8 +33,8 @@ export interface MediaViewerProps {
   initialIndex?: number
   /** Called when the viewer is closed */
   onClose: () => void
-  /** Called when a file is deleted */
-  onDelete?: (file: MediaFile) => void
+  /** Called when files are requested to be deleted */
+  onDeleteRequest?: (files: MediaFile[]) => void
 }
 
 function useFileUrl(file: MediaFile | undefined) {
@@ -172,13 +172,16 @@ function ViewerAudioPlayer({ file }: { file: MediaFile }) {
 }
 
 // ─── Main Viewer ──────────────────────────────────────────────────────
-function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose, onDelete }: MediaViewerProps) {
+function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose, onDeleteRequest }: MediaViewerProps) {
   const [activeIndex, setActiveIndex] = useState(initialIndex)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const thumbnailContainerRef = useRef<HTMLDivElement>(null)
+
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
 
   const activeFile = viewableFiles[activeIndex]
   const isImage = activeFile?.type === 'image'
@@ -260,6 +263,30 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose,
     a.href = activeFile.media_url
     a.download = activeFile.filename
     a.click()
+  }
+
+  const handleToggleSelect = (idx: number) => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  const handleDeleteClick = () => {
+    if (!isSelectionMode) {
+      setIsSelectionMode(true)
+      setSelectedIndices(new Set([activeIndex]))
+    } else {
+      if (selectedIndices.size > 0) {
+        const filesToDelete = Array.from(selectedIndices).map(i => viewableFiles[i])
+        onDeleteRequest?.(filesToDelete)
+        onClose()
+      } else {
+        setIsSelectionMode(false)
+      }
+    }
   }
 
   if (!activeFile) return null
@@ -366,7 +393,7 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose,
           </button>
           
           <button
-            onClick={() => activeFile && onDelete?.(activeFile)}
+            onClick={handleDeleteClick}
             className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
             title="Delete"
           >
@@ -411,6 +438,29 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose,
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         >
+          {isSelectionMode && (
+            <div 
+              className="absolute top-6 left-6 z-50 cursor-pointer"
+              onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleSelect(activeIndex);
+              }}
+            >
+                <div className={cn(
+                    "w-[24px] h-[24px] rounded-full border-2 flex items-center justify-center transition-all duration-200 shadow-sm hover:scale-105",
+                    selectedIndices.has(activeIndex)
+                        ? "bg-[#00a884] border-[#00a884]"
+                        : "border-white/80 bg-black/20"
+                )}>
+                    {selectedIndices.has(activeIndex) && (
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M3 7.5L5.5 10L11 4.5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    )}
+                </div>
+            </div>
+          )}
+
           {isImage && (
             <div
               className="transition-transform duration-150 ease-out"
@@ -445,10 +495,10 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose,
 
       {/* ── Thumbnail Strip ───────────────────────────────────────── */}
       {viewableFiles.length > 1 && (
-        <div className="shrink-0 py-3 px-4 bg-white dark:bg-[#0b141a] border-t border-gray-200/50 dark:border-white/5">
+        <div className="relative shrink-0 py-3 px-4 flex items-center justify-center bg-white dark:bg-[#0b141a] border-t border-gray-200/50 dark:border-white/5">
           <div
             ref={thumbnailContainerRef}
-            className="flex items-center justify-center gap-2 overflow-x-auto no-scrollbar py-1"
+            className="flex items-center justify-center gap-2 overflow-x-auto no-scrollbar py-1 w-full max-w-full"
           >
             {viewableFiles.map((file, idx) => {
               const isActive = idx === activeIndex
@@ -463,11 +513,22 @@ function MediaViewerComponent({ files: viewableFiles, initialIndex = 0, onClose,
                   onClick={() => goTo(idx)}
                   className={cn(
                     "relative shrink-0 w-[52px] h-[52px] rounded-md overflow-hidden border-2 transition-all duration-200",
-                    isActive
+                    isActive 
                       ? "border-[#00a884] scale-110 shadow-lg shadow-[#00a884]/20 z-10"
-                      : "border-transparent opacity-60 hover:opacity-100 hover:border-gray-300 dark:hover:border-white/30"
+                      : "border-transparent opacity-60 hover:opacity-100 dark:hover:border-white/30",
+                    selectedIndices.has(idx) && "ring-2 ring-[#00a884] opacity-100 scale-105"
                   )}
                 >
+                  {isSelectionMode && selectedIndices.has(idx) && (
+                      <div className="absolute top-1 left-1 z-50">
+                          <div className="w-[14px] h-[14px] rounded-full border flex items-center justify-center transition-all bg-[#00a884] border-[#00a884]">
+                              <svg width="8" height="8" viewBox="0 0 14 14" fill="none">
+                                  <path d="M3 7.5L5.5 10L11 4.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                          </div>
+                      </div>
+                  )}
+
                   {isThumbImage && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
