@@ -117,7 +117,7 @@ const MessageBubble = ({
     selectedIds?: Set<string>,
     onToggleSelect?: (id: string) => void,
     onEnterSelectionMode?: (msgId: string) => void,
-    onMediaViewerDeleteRequest?: (msgId: string, files: MediaFile[]) => void,
+    onMediaViewerDeleteRequest?: (msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => void,
     peerAvatar?: string | null,
     peerName?: string | null,
 }) => {
@@ -311,7 +311,7 @@ const MessageBubble = ({
                                             messageStatus={messageStatusKey}
                                             allVisualMedia={allVisualMedia}
                                             currentUserId={currentUser.id}
-                                            onViewerDeleteRequest={(files) => onMediaViewerDeleteRequest?.(msg.id, files)}
+                                            onViewerDeleteRequest={(files, type) => onMediaViewerDeleteRequest?.(msg.id, files, type)}
                                             isSelectionMode={isSelectionMode}
                                             selectedIds={selectedIds}
                                             onToggleSelect={onToggleSelect}

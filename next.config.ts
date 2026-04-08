@@ -4,6 +4,7 @@ import { withSerwist } from "@serwist/turbopack";
 const nextConfig: NextConfig = {
   /* config options here */
   images: {
+    dangerouslyAllowLocalIP: true,
     remotePatterns: [
       {
         protocol: "http",

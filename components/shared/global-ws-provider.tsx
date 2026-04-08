@@ -563,31 +563,6 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
-        // ── Deletion handler ──────────────────────────────────────────
-        if (msg.type === "handle_user_chatlist_update" && msg.action === "delete") {
-            const updateDeletion = async () => {
-                try {
-                    const messageId = msg.data?.message?.id || msg.data?.direct_message_id || msg.data?.groupchat_id;
-                    if (!messageId) return;
-
-                    const isDM = !!msg.data?.direct_message_id;
-                    const table = isDM ? db.directmessagechats : db.groupmessagechats;
-                    
-                    const existing = await table.get(messageId);
-                    if (existing) {
-                        await table.update(messageId, {
-                            deleted: msg.data?.message?.deleted || msg.data?.deleted,
-                            files: msg.data?.message?.files || msg.data?.files || existing.files
-                        });
-                    }
-                } catch (error) {
-                    console.error("Failed to process deletion via WS", error);
-                }
-            };
-            updateDeletion();
-            return;
-        }
-
         // ── Typing indicator ────────────────────────────────────────────
         if (msg.chatId && typeof msg.isTyping === "boolean") {
             if (msg.type === "typing" && msg.chatType === "groupchat" && msg.userTyping != null) {

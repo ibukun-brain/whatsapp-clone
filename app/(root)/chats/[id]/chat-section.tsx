@@ -43,6 +43,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { file } from "zod";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -423,10 +424,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         setIsDeleteDialogOpen(true);
     }, []);
 
-    const confirmDeleteForMe = useCallback(() => {
+    const confirmDeleteForMe = useCallback((idsOverride?: Set<string>) => {
         if (!currentUser) return;
 
-        const selectedArr = Array.from(selectedMessageIds);
+        const ids = idsOverride || selectedMessageIds;
+        const selectedArr = Array.from(ids);
         const messageIds = selectedArr.filter(id => !id.includes(":"));
         const fileSelections = selectedArr
             .filter(id => id.includes(":"))
@@ -490,12 +492,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             data: {
                 action: "delete",
                 chat_type: chatType,
-                message: {
-                    delete_type: "for_me",
-                    user_ids: [currentUser.id],
-                    message_ids: messageIds,
-                    file_selections: fileSelections.map(fs => fs.file_id)
-                }
+                delete_type: "for_me" as const,
+                deleted_by: currentUser.id,
+                message_ids: messageIds,
+                file_selections: fileSelections.map((fileSelection) => fileSelection.file_id)
             }
         });
 
@@ -503,10 +503,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         setIsDeleteDialogOpen(false);
     }, [selectedMessageIds, handleExitSelectionMode, currentUser, chatType, sendChatMessage, directMessage, groupMessage]);
 
-    const confirmDeleteForEveryone = useCallback(() => {
+    const confirmDeleteForEveryone = useCallback((idsOverride?: Set<string>) => {
         if (!currentUser) return;
 
-        const selectedArr = Array.from(selectedMessageIds);
+        const ids = idsOverride || selectedMessageIds;
+        const selectedArr = Array.from(ids);
 
         const messageIds = selectedArr.filter(id => !id.includes(":"));
 
@@ -516,14 +517,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 const [mId, fId] = id.split(":");
                 return { message_id: mId, file_id: fId };
             });
-
-        let userIds: string[] = [];
-
-        if (chatType === "directmessage" && directMessage?.direct_message) {
-            userIds = [currentUser.id, directMessage.direct_message.dm_user_id];
-        } else if (chatType === "groupchat") {
-            userIds = groupMembers.map(m => m.user?.id).filter(id => id !== undefined) as string[];
-        }
 
         // ── Optimistic DB updates ──────────────────────────────────────
         const isDM = chatType === "directmessage";
@@ -574,16 +567,15 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             }
         }
 
+
         sendChatMessage({
             type: chatType,
             data: {
                 action: "delete",
-                message: {
-                    delete_type: "for_everyone",
-                    user_ids: userIds,
-                    message_ids: messageIds,
-                    file_selections: fileSelections
-                }
+                delete_type: "for_everyone" as const,
+                deleted_by: currentUser.id,
+                message_ids: messageIds,
+                file_selections: fileSelections.map((fileSelection) => fileSelection.file_id)
             }
         });
 
@@ -606,13 +598,16 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
     }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, chatType]);
 
-    const handleMediaViewerDeleteRequest = useCallback((msgId: string, files: MediaFile[]) => {
+    const handleMediaViewerDeleteRequest = useCallback((msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => {
         const newSelection = new Set<string>();
         files.forEach(f => newSelection.add(`${msgId}:${f.file_id}`));
-        setSelectedMessageIds(newSelection);
-        setIsSelectionMode(true);
-        setIsDeleteDialogOpen(true);
-    }, []);
+
+        if (type === 'for_everyone') {
+            confirmDeleteForEveryone(newSelection);
+        } else {
+            confirmDeleteForMe(newSelection);
+        }
+    }, [confirmDeleteForMe, confirmDeleteForEveryone]);
 
     // Reset selection mode when switching chats
     React.useEffect(() => {
@@ -710,78 +705,103 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
         if ((msg.type === "directmessage" || msg.type === "groupchat") && msg.action === "delete" && msg.data) {
             const deleteData = msg.data as unknown as {
-                delete_type: "for_me" | "for_everyone";
-                deleted_by: string;
-                message_ids?: string[];
-                file_selections?: { message_id: string; file_id: string }[];
-                file_ids?: string[];
+                chat_id: string,
+                deleted: {
+                    delete_type: "for_me" | "for_everyone";
+                    deleted_by: string;
+                    message_id?: string;
+                    file_id?: string;
+                }[]
             };
 
             const isDM = msg.type === "directmessage";
             const table = isDM ? db.directmessagechats : db.groupmessagechats;
 
             const processDeletions = async () => {
-                // 1. Handle full message deletions
-                if (deleteData.message_ids && deleteData.message_ids.length > 0) {
-                    for (const mId of deleteData.message_ids) {
-                        const existing = await table.get(mId);
+                if (deleteData.chat_id !== chatId || !Array.isArray(deleteData.deleted)) return;
+
+                const chatItem = isDM ? directMessage : groupMessage;
+                const chatObj = isDM ? chatItem?.direct_message : chatItem?.group_chat;
+                const recentContentId = chatObj?.recent_content_id;
+
+                for (const item of deleteData.deleted) {
+                    console.log("item", item)
+                    const { delete_type, deleted_by, message_id, file_id } = item;
+                    console.log("deleted_by", deleted_by)
+                    if (!message_id) continue;
+
+                    if (file_id && message_id) {
+                        // 1. Handle specific file deletion within a message
+                        const existingMsg = await table.get(message_id);
+                        if (existingMsg && existingMsg.files) {
+                            const updatedFiles = existingMsg.files.map(f => {
+                                if (f.file_id === file_id) {
+                                    return {
+                                        ...f,
+                                        deleted: {
+                                            file_id,
+                                            delete_type,
+                                            deleted_by,
+                                        }
+                                    };
+                                }
+                                return f;
+                            });
+                            await table.update(message_id, { files: updatedFiles });
+                        }
+
+                        // ── Update chatlist recent_deleted if needed ──────
+                        if (chatItem && recentContentId === message_id) {
+                            const deletedInfo = { file_id, delete_type, deleted_by };
+                            if (isDM && chatItem.direct_message) {
+                                const updatedRecentFiles = chatItem.direct_message.recent_files?.map(f =>
+                                    f.file_id === file_id ? { ...f, deleted: deletedInfo } : f
+                                );
+                                await db.chatlist.update(chatItem.id, {
+                                    direct_message: {
+                                        ...chatItem.direct_message,
+                                        recent_deleted: deletedInfo,
+                                        recent_files: updatedRecentFiles
+                                    }
+                                });
+                            } else if (!isDM && chatItem.group_chat) {
+                                const updatedRecentFiles = chatItem.group_chat.recent_files?.map(f =>
+                                    f.file_id === file_id ? { ...f, deleted: deletedInfo } : f
+                                );
+                                await db.chatlist.update(chatItem.id, {
+                                    group_chat: {
+                                        ...chatItem.group_chat,
+                                        recent_deleted: deletedInfo,
+                                        recent_files: updatedRecentFiles
+                                    }
+                                });
+                            }
+                        }
+                    } else {
+                        // 2. Handle full message deletion
+                        const existing = await table.get(message_id);
                         if (existing) {
-                            await table.update(mId, {
+                            await table.update(message_id, {
                                 deleted: {
-                                    message_id: mId,
-                                    delete_type: deleteData.delete_type,
-                                    deleted_by: deleteData.deleted_by,
+                                    message_id,
+                                    delete_type,
+                                    deleted_by,
                                 }
                             });
                         }
-                    }
-                }
 
-                // 2. Handle specific file deletions
-                if (deleteData.file_selections && deleteData.file_selections.length > 0) {
-                    for (const selection of deleteData.file_selections) {
-                        const mId = selection.message_id;
-                        const fId = selection.file_id;
-                        const existing = await table.get(mId);
-                        if (existing && existing.files) {
-                            const updatedFiles = existing.files.map(f => {
-                                if (f.file_id === fId) {
-                                    return {
-                                        ...f,
-                                        deleted: {
-                                            file_id: fId,
-                                            delete_type: deleteData.delete_type,
-                                            deleted_by: deleteData.deleted_by,
-                                        }
-                                    };
-                                }
-                                return f;
-                            });
-                            await table.update(mId, { files: updatedFiles });
-                        }
-                    }
-                }
-
-                // 3. Handle file_ids (fallback/direct file deletion)
-                if (deleteData.file_ids && deleteData.file_ids.length > 0) {
-                    const allMsgs = await table.where(isDM ? 'direct_message_id' : 'groupchat_id').equals(chatId).toArray();
-                    for (const fId of deleteData.file_ids) {
-                        const parentMsg = allMsgs.find(m => m.files?.some(f => f.file_id === fId));
-                        if (parentMsg && parentMsg.files) {
-                            const updatedFiles = parentMsg.files.map(f => {
-                                if (f.file_id === fId) {
-                                    return {
-                                        ...f,
-                                        deleted: {
-                                            file_id: f.file_id,
-                                            delete_type: deleteData.delete_type,
-                                            deleted_by: deleteData.deleted_by,
-                                        }
-                                    };
-                                }
-                                return f;
-                            });
-                            await table.update(parentMsg.id, { files: updatedFiles });
+                        // ── Update chatlist recent_deleted if needed ──────
+                        if (chatItem && recentContentId === message_id) {
+                            const deletedInfo = { message_id, delete_type, deleted_by };
+                            if (isDM && chatItem.direct_message) {
+                                await db.chatlist.update(chatItem.id, {
+                                    direct_message: { ...chatItem.direct_message, recent_deleted: deletedInfo }
+                                });
+                            } else if (!isDM && chatItem.group_chat) {
+                                await db.chatlist.update(chatItem.id, {
+                                    group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo }
+                                });
+                            }
                         }
                     }
                 }
@@ -1905,14 +1925,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     <div className="flex flex-col items-end gap-2.5 px-6 pb-6 pt-2 w-full">
                         {canDeleteForEveryone && (
                             <button
-                                onClick={confirmDeleteForEveryone}
+                                onClick={() => confirmDeleteForEveryone()}
                                 className="w-auto min-w-[140px] px-6 py-2.5 bg-white hover:bg-[#eaf7f2] text-[#008069] text-[15px] font-medium rounded-full border border-[#008069]/10 transition-colors cursor-pointer"
                             >
                                 Delete for everyone
                             </button>
                         )}
                         <button
-                            onClick={confirmDeleteForMe}
+                            onClick={() => confirmDeleteForMe()}
                             className="w-auto min-w-[140px] px-6 py-2.5 bg-white hover:bg-[#eaf7f2] text-[#008069] text-[15px] font-medium rounded-full border border-[#d1d7db] transition-colors cursor-pointer"
                         >
                             Delete for me

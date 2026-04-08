@@ -1,12 +1,10 @@
 import React, { memo, useState, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import { MediaFile } from '@/types/mediaTypes'
 import ImageMessage from './ImageMessage'
 import VideoMessage from './VideoMessage'
 import FileMessage from './FileMessage'
 import AudioMessage from './AudioMessage'
 import VoiceMessage from './VoiceMessage'
-import MediaViewer from './MediaViewer'
 import { useMediaViewer } from './MediaViewerContext'
 import { cn, getDateTimeByTimezone } from '@/lib/utils'
 
@@ -20,27 +18,14 @@ interface MediaGridProps {
   messageStatus?: string
   allVisualMedia?: MediaFile[]
   currentUserId?: string
-  onViewerDeleteRequest?: (files: MediaFile[]) => void
+  onViewerDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void
   isSelectionMode?: boolean
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
   msgId?: string
 }
 
-const SelectionCheckbox = ({ checked }: { checked: boolean }) => (
-    <div className={cn(
-        "w-[20px] h-[20px] rounded-[3px] border-2 flex items-center justify-center transition-all duration-200",
-        checked
-            ? "bg-[#00a884] border-[#00a884]"
-            : "border-white/80 bg-black/20"
-    )}>
-        {checked && (
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-        )}
-    </div>
-);
+
 
 function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [], currentUserId, onViewerDeleteRequest, isSelectionMode, selectedIds, onToggleSelect, msgId }: MediaGridProps) {
   const { openViewer } = useMediaViewer()
@@ -61,7 +46,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
     const idx = mediaToUse.findIndex(f => f.file_id === file.file_id)
 
     if (idx >= 0 && (file.media_url || file.preview_url || file.file_blob)) {
-      openViewer(mediaToUse, idx, onViewerDeleteRequest)
+      openViewer(mediaToUse, idx, onViewerDeleteRequest, isMine, currentUserId)
     }
   }, [viewableFiles, allVisualMedia, openViewer, onViewerDeleteRequest])
 
@@ -124,11 +109,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
           fill={visuals.length > 1}
         />
 
-        {isSelectionMode && msgId && (
-            <div className="absolute top-1.5 left-1.5 z-40">
-                <SelectionCheckbox checked={!!isSelected} />
-            </div>
-        )}
+
 
         {showOverlay && overlayCount && overlayCount > 0 && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[1px] text-2xl font-semibold text-white pointer-events-none">
@@ -214,7 +195,6 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
         <div className={cn("flex flex-col gap-1", visuals.length > 0 && "mt-1")}>
           {attachments.map(file => {
             const { time: fileTime } = getDateTimeByTimezone(file.timestamp, userTimezone)
-            const isSelected = isSelectionMode && msgId && selectedIds?.has(`${msgId}:${file.file_id}`);
             
             const handleItemClick = (e: React.MouseEvent) => {
                 if (isSelectionMode && onToggleSelect && msgId) {
@@ -228,11 +208,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
 
             const Wrapper = ({ children }: { children: React.ReactNode }) => (
                 <div className={cn("relative flex items-center p-1 rounded hover:bg-black/5 transition-colors", isSelectionMode && "cursor-pointer")} onClick={handleItemClick}>
-                    {isSelectionMode && msgId && (
-                        <div className="mr-2 shrink-0">
-                            <SelectionCheckbox checked={!!isSelected} />
-                        </div>
-                    )}
+
                     <div className={cn("flex-1 overflow-hidden", isSelectionMode && msgId && "pointer-events-none")}>
                         {children}
                     </div>

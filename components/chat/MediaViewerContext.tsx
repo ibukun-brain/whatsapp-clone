@@ -6,7 +6,7 @@ import { MediaFile } from '@/types/mediaTypes'
 import MediaViewer from './MediaViewer'
 
 interface MediaViewerContextType {
-  openViewer: (files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[]) => void) => void
+  openViewer: (files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string) => void
   closeViewer: () => void
 }
 
@@ -17,16 +17,20 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
     isOpen: boolean
     files: MediaFile[]
     initialIndex: number
-    onDeleteRequest?: (files: MediaFile[]) => void
+    onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void
+    canDeleteForEveryone?: boolean
+    currentUserId?: string
   }>({
     isOpen: false,
     files: [],
     initialIndex: 0,
-    onDeleteRequest: undefined
+    onDeleteRequest: undefined,
+    canDeleteForEveryone: false,
+    currentUserId: undefined
   })
 
-  const openViewer = useCallback((files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[]) => void) => {
-    setViewerState({ isOpen: true, files, initialIndex, onDeleteRequest })
+  const openViewer = useCallback((files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string) => {
+    setViewerState({ isOpen: true, files, initialIndex, onDeleteRequest, canDeleteForEveryone, currentUserId })
   }, [])
 
   const closeViewer = useCallback(() => {
@@ -42,6 +46,8 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
           initialIndex={viewerState.initialIndex}
           onClose={closeViewer}
           onDeleteRequest={viewerState.onDeleteRequest}
+          canDeleteForEveryone={viewerState.canDeleteForEveryone}
+          currentUserId={viewerState.currentUserId}
         />,
         document.body
       )}
