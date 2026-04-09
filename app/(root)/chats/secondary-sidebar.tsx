@@ -87,7 +87,7 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
     files?.filter((f) => {
       if (!f.deleted) return true;
       if (f.deleted.delete_type === "for_everyone") return false;
-      if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUserId) return false;
+      if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUserId)) return false;
       return true;
     }) || [];
 
@@ -112,8 +112,8 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
   // as the sidebar should show the previous message instead.
   if (showDeletedPlaceholder && isDeletedForEveryone) {
     const deletedByMe =
-      deleted?.deleted_by === currentUserId ||
-      (files && files.some((f) => f.deleted?.deleted_by === currentUserId));
+      String(deleted?.deleted_by) === String(currentUserId) ||
+      (files && files.some((f) => String(f.deleted?.deleted_by) === String(currentUserId)));
     return (
       <span className="flex items-center gap-1 w-full truncate italic text-muted-foreground">
         <Ban size={14} className="shrink-0" />
@@ -421,10 +421,10 @@ export const SecondarySidebar = () => {
             : [];
 
         const latestMsg = messages.reverse().find((m) => {
-          if (m.deleted?.delete_type === "for_me") return false;
+          if (m.deleted?.delete_type === "for_me" && String(m.deleted.deleted_by) === String(currentUserId)) return false;
           // If all files are deleted for me and there's no text content
           if (!m.content && m.files && m.files.length > 0) {
-            const visible = m.files.filter(f => !f.deleted || f.deleted.delete_type !== "for_me");
+            const visible = m.files.filter(f => !f.deleted || (f.deleted.delete_type !== "for_me" || String(f.deleted.deleted_by) !== String(currentUserId)));
             if (visible.length === 0) return false;
           }
           return true;
@@ -449,7 +449,7 @@ export const SecondarySidebar = () => {
             chat.group_chat.recent_message_type = gm.type;
             chat.group_chat.recent_deleted = gm.deleted;
             chat.group_chat.recent_user_id = gm.user.id;
-            chat.group_chat.recent_user_display_name = gm.user.display_name;
+            chat.group_chat.recent_user_display_name = gm.contact_name,
             chat.group_chat.receipt = gm.receipt;
             chat.group_chat.recent_voice_message = gm.voice_message;
             chat.group_chat.recent_voice_message_duration = gm.voice_message_duration;

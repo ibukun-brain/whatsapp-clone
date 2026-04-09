@@ -195,7 +195,7 @@ function MediaViewerComponent({
   const filteredViewableFiles = initialViewableFiles.filter(f => {
     if (!f.deleted) return true;
     if (f.deleted.delete_type === "for_everyone") return false;
-    if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUserId) return false;
+    if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUserId)) return false;
     return true;
   });
 
@@ -635,7 +635,7 @@ function MediaViewerComponent({
       )}
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="w-[450px] rounded-[16px] p-0 border-none shadow-2xl bg-white overflow-hidden animate-in fade-in zoom-in duration-200 z-[10000]">
+        <AlertDialogContent className="w-[450px] rounded-[16px] p-0 border-none shadow-2xl bg-white overflow-hidden animate-in fade-in zoom-in duration-200 z-10000">
           <AlertDialogHeader className="px-6 pt-6 pb-2">
             <AlertDialogTitle className="text-[19px] font-medium text-[#111b21] tracking-tight">
               Delete message{selectedIndices.size > 1 ? 's' : ''}?

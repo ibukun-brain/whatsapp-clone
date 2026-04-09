@@ -23,13 +23,11 @@ type GroupMessageUserInfo = {
     onlineUsersCount?: number
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, isTyping, isRecording, timezone }: {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, timezone }: {
     directMessageUserInfo: DirectMessageUserInfo | null,
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
     groupMembers?: GroupMember[],
-    isTyping?: boolean,
-    isRecording?: boolean,
     timezone?: string,
 }) => {
     const [showContactHint, setShowContactHint] = React.useState(true)
@@ -72,40 +70,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                             </span>
                             <div className="relative h-4">
                                 <AnimatePresence mode="wait">
-                                    {isTyping ? (
-                                        <motion.span
-                                            key="typing"
-                                            initial={{ y: 10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
-                                        >
-                                            Typing…
-                                        </motion.span>
-                                    ) : isRecording ? (
-                                        <motion.span
-                                            key="recording"
-                                            initial={{ y: 10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
-                                        >
-                                            Recording…
-                                        </motion.span>
-                                    ) : directMessageUserInfo?.isOnline ? (
-                                        <motion.span
-                                            key="online"
-                                            initial={{ y: 10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
-                                        >
-                                            Online
-                                        </motion.span>
-                                    ) : showContactHint ? (
+                                    {showContactHint ? (
                                         <motion.span
                                             key="hint"
                                             initial={{ y: 10, opacity: 0 }}
@@ -145,29 +110,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                             </span>
                             <div className="relative h-4">
                                 <AnimatePresence mode="wait">
-                                    {isTyping ? (
-                                        <motion.span
-                                            key="typing"
-                                            initial={{ y: 10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
-                                        >
-                                            Typing…
-                                        </motion.span>
-                                    ) : isRecording ? (
-                                        <motion.span
-                                            key="recording"
-                                            initial={{ y: 10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#00a884] whitespace-nowrap"
-                                        >
-                                            Recording…
-                                        </motion.span>
-                                    ) : showGroupHint ? (
+                                    {showGroupHint ? (
                                         <motion.span
                                             key="hint"
                                             initial={{ y: 10, opacity: 0 }}
@@ -198,7 +141,7 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                                             transition={{ duration: 0.2 }}
                                             className="absolute top-0 left-0 text-[12px] font-normal text-[#54656f] truncate pr-4"
                                         >
-                                            {groupMembers?.map(m => m.name).join(", ")}
+                                            {groupMembers?.filter(m => m.name !== "You").map(m => m.name).join(", ")}{", You"}
                                         </motion.span>
                                     )}
                                 </AnimatePresence>

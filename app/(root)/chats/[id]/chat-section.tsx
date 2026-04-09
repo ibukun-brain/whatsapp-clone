@@ -289,11 +289,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         const filtered = unique.filter(m => {
-            if (m.deleted && m.deleted.delete_type === "for_me" && m.deleted.deleted_by === currentUser?.id) return false;
+            if (m.deleted && m.deleted.delete_type === "for_me" && String(m.deleted.deleted_by) === String(currentUser?.id)) return false;
 
             // If all files are deleted 'for me' and there's no text content, hide the message
             if (m.files && m.files.length > 0 && !m.content) {
-                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser?.id);
+                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser?.id));
                 if (allDoneForMe) return false;
             }
 
@@ -327,11 +327,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         });
 
         const filtered = unique.filter(m => {
-            if (m.deleted && m.deleted.delete_type === "for_me" && m.deleted.deleted_by === currentUser?.id) return false;
+            if (m.deleted && m.deleted.delete_type === "for_me" && String(m.deleted.deleted_by) === String(currentUser?.id)) return false;
 
             // If all files are deleted 'for me' and there's no text content, hide the message
             if (m.files && m.files.length > 0 && !m.content) {
-                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser?.id);
+                const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser?.id));
                 if (allDoneForMe) return false;
             }
 
@@ -347,12 +347,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (!currentUser) return [];
 
         return messages
+            .filter(m => {
+                if (!m.deleted) return true;
+                if (m.deleted.delete_type === "for_everyone") return false;
+                if (m.deleted.delete_type === "for_me" && m.deleted.deleted_by === currentUser.id) return false;
+                return true;
+            })
             .flatMap(m => m.files || [])
             .filter(f => f.type === 'image' || f.type === 'video' || f.type === 'audio' || f.type === 'voice_recording')
             .filter(f => {
                 if (!f.deleted) return true;
                 if (f.deleted.delete_type === "for_everyone") return false;
-                if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser.id) return false;
+                if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return false;
                 return true;
             });
     }, [processedDirectMessages, processedGroupMessages, chatType, currentUser]);
@@ -361,7 +367,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const allVisualMediaRef = useRef(allVisualMediaRaw);
     const allVisualMedia = useMemo(() => {
         const isSame = allVisualMediaRef.current.length === allVisualMediaRaw.length &&
-            allVisualMediaRef.current.every((f, i) => f.file_id === allVisualMediaRaw[i].file_id && f.status === allVisualMediaRaw[i].status);
+            allVisualMediaRef.current.every((f, i) => f.file_id === allVisualMediaRaw[i].file_id && f.status === allVisualMediaRaw[i].status && JSON.stringify(f.deleted) === JSON.stringify(allVisualMediaRaw[i].deleted));
 
         if (!isSame) {
             allVisualMediaRef.current = allVisualMediaRaw;
@@ -476,13 +482,32 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     db.chatlist.update(chatItem.id, { group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo } });
                 }
             }
+
             const recentFileSelection = fileSelections.find(fs => fs.message_id === recentContentId);
             if (recentFileSelection) {
                 const deletedInfo = { file_id: recentFileSelection.file_id, delete_type: "for_me" as const, deleted_by: currentUser.id };
                 if (isDM && chatItem.direct_message) {
-                    db.chatlist.update(chatItem.id, { direct_message: { ...chatItem.direct_message, recent_deleted: deletedInfo } });
+                    const updatedRecentFiles = chatItem.direct_message.recent_files?.map(f =>
+                        f.file_id === recentFileSelection.file_id ? { ...f, deleted: deletedInfo } : f
+                    );
+                    db.chatlist.update(chatItem.id, {
+                        direct_message: {
+                            ...chatItem.direct_message,
+                            recent_deleted: deletedInfo,
+                            recent_files: updatedRecentFiles
+                        }
+                    });
                 } else if (!isDM && chatItem.group_chat) {
-                    db.chatlist.update(chatItem.id, { group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo } });
+                    const updatedRecentFiles = chatItem.group_chat.recent_files?.map(f =>
+                        f.file_id === recentFileSelection.file_id ? { ...f, deleted: deletedInfo } : f
+                    );
+                    db.chatlist.update(chatItem.id, {
+                        group_chat: {
+                            ...chatItem.group_chat,
+                            recent_deleted: deletedInfo,
+                            recent_files: updatedRecentFiles
+                        }
+                    });
                 }
             }
         }
@@ -556,13 +581,32 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     db.chatlist.update(chatItem.id, { group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo } });
                 }
             }
+
             const recentFileSelection = fileSelections.find(fs => fs.message_id === recentContentId);
             if (recentFileSelection) {
                 const deletedInfo = { file_id: recentFileSelection.file_id, delete_type: "for_everyone" as const, deleted_by: currentUser.id };
                 if (isDM && chatItem.direct_message) {
-                    db.chatlist.update(chatItem.id, { direct_message: { ...chatItem.direct_message, recent_deleted: deletedInfo } });
+                    const updatedRecentFiles = chatItem.direct_message.recent_files?.map(f =>
+                        f.file_id === recentFileSelection.file_id ? { ...f, deleted: deletedInfo } : f
+                    );
+                    db.chatlist.update(chatItem.id, {
+                        direct_message: {
+                            ...chatItem.direct_message,
+                            recent_deleted: deletedInfo,
+                            recent_files: updatedRecentFiles
+                        }
+                    });
                 } else if (!isDM && chatItem.group_chat) {
-                    db.chatlist.update(chatItem.id, { group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo } });
+                    const updatedRecentFiles = chatItem.group_chat.recent_files?.map(f =>
+                        f.file_id === recentFileSelection.file_id ? { ...f, deleted: deletedInfo } : f
+                    );
+                    db.chatlist.update(chatItem.id, {
+                        group_chat: {
+                            ...chatItem.group_chat,
+                            recent_deleted: deletedInfo,
+                            recent_files: updatedRecentFiles
+                        }
+                    });
                 }
             }
         }
@@ -634,38 +678,29 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     React.useEffect(() => {
         if (!lastChatMessage) return;
 
-        const msg = lastChatMessage as {
-            type?: "directmessage" | "groupchat" | "group_online_users";
-            action?: string;
-            data?: DirectMessageChats | Chat | WSData;
-            [key: string]: any;
-        };
+        const msg = lastChatMessage as any;
 
-        if (msg.type === "group_online_users" && msg.data && "online_users" in msg.data) {
+        // 1. Chat online users update
+        if (msg.type === "group_online_users" && msg.data?.group_id) {
             const count = msg.data.online_users;
             const groupId = msg.data.group_id;
-            const updateGroupOnline = async () => {
+            (async () => {
                 const chat = await db.chatlist.filter(c => c.group_chat?.id === groupId).first();
                 if (chat?.group_chat) {
                     await db.chatlist.update(chat.id, {
-                        group_chat: {
-                            ...chat.group_chat,
-                            online_users: count
-                        }
+                        group_chat: { ...chat.group_chat, online_users: count }
                     });
                 }
-            };
-            updateGroupOnline();
+            })();
             return;
         }
 
+        // 2. Direct message send
         if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
             const incomingMsg = msg.data as DirectMessageChats;
-            // Clear local optimistic state if matches
             setLocalOptimisticMessages(prev => prev.filter(m =>
                 m.client_msg_id ? m.client_msg_id !== incomingMsg.client_msg_id : m.content !== incomingMsg.content
             ));
-            // Clean up any optimistic messages in DB that match the client_msg_id or content
             db.directmessagechats
                 .where('direct_message_id').equals(chatId)
                 .and(m => (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || (m.user === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content))
@@ -676,12 +711,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             return;
         }
 
+        // 3. Group chat message send
         if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
-            const incomingMsg = (msg.data as WSData).groupchat_messages
-            const recipients = (msg.data as WSData).groupchat_message_recipients
-            // Clear local optimistic state if matches
+            const incomingMsg = (msg.data as WSData).groupchat_messages;
+            const recipients = (msg.data as WSData).groupchat_message_recipients;
             setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
-            // Clean up any optimistic messages in DB that match the content and user
             db.groupmessagechats
                 .where('groupchat_id').equals(chatId)
                 .and(m => {
@@ -698,39 +732,35 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     ...r,
                     delivered_date: new Date(r.delivered_date),
                     read_date: r.read_date ? new Date(r.read_date) : null
-                })))
+                })));
             }
             return;
         }
 
+        // 4. Message/File deletion
         if ((msg.type === "directmessage" || msg.type === "groupchat") && msg.action === "delete" && msg.data) {
-            const deleteData = msg.data as unknown as {
+            const deleteData = msg.data as {
                 chat_id: string,
                 deleted: {
                     delete_type: "for_me" | "for_everyone";
                     deleted_by: string;
                     message_id?: string;
-                    file_id?: string;
+                    file_id?: string | null;
                 }[]
             };
-
-            const isDM = msg.type === "directmessage";
-            const table = isDM ? db.directmessagechats : db.groupmessagechats;
-
-            const processDeletions = async () => {
-                if (deleteData.chat_id !== chatId || !Array.isArray(deleteData.deleted)) return;
-
-                const chatItem = isDM ? directMessage : groupMessage;
-                const chatObj = isDM ? chatItem?.direct_message : chatItem?.group_chat;
-                const recentContentId = chatObj?.recent_content_id;
-
+            if (deleteData.chat_id !== chatId || !Array.isArray(deleteData.deleted)) return;
+            (async () => {
                 for (const item of deleteData.deleted) {
-                    console.log("item", item)
                     const { delete_type, deleted_by, message_id, file_id } = item;
-                    console.log("deleted_by", deleted_by)
                     if (!message_id) continue;
+                    const freshChat = await db.chatlist.filter(chat => chat.group_chat?.id === chatId || chat.direct_message?.id === chatId).first();
+                    if (!freshChat) continue;
+                    const isDM = freshChat.chat_type === "directmessage";
+                    const table = isDM ? db.directmessagechats : db.groupmessagechats;
+                    const chatObj = isDM ? freshChat.direct_message : freshChat.group_chat;
+                    const recentContentId = chatObj?.recent_content_id;
 
-                    if (file_id && message_id) {
+                    if (file_id) {
                         // 1. Handle specific file deletion within a message
                         const existingMsg = await table.get(message_id);
                         if (existingMsg && existingMsg.files) {
@@ -738,11 +768,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 if (f.file_id === file_id) {
                                     return {
                                         ...f,
-                                        deleted: {
-                                            file_id,
-                                            delete_type,
-                                            deleted_by,
-                                        }
+                                        deleted: { file_id, delete_type, deleted_by }
                                     };
                                 }
                                 return f;
@@ -750,30 +776,22 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             await table.update(message_id, { files: updatedFiles });
                         }
 
-                        // ── Update chatlist recent_deleted if needed ──────
-                        if (chatItem && recentContentId === message_id) {
+                        // Update chatlist recent_deleted if needed
+                        if (recentContentId === message_id && chatObj) {
                             const deletedInfo = { file_id, delete_type, deleted_by };
-                            if (isDM && chatItem.direct_message) {
-                                const updatedRecentFiles = chatItem.direct_message.recent_files?.map(f =>
+                            if (isDM && freshChat.direct_message) {
+                                const updatedRecentFiles = freshChat.direct_message.recent_files?.map(f =>
                                     f.file_id === file_id ? { ...f, deleted: deletedInfo } : f
                                 );
-                                await db.chatlist.update(chatItem.id, {
-                                    direct_message: {
-                                        ...chatItem.direct_message,
-                                        recent_deleted: deletedInfo,
-                                        recent_files: updatedRecentFiles
-                                    }
+                                await db.chatlist.update(freshChat.id, {
+                                    direct_message: { ...freshChat.direct_message, recent_deleted: deletedInfo, recent_files: updatedRecentFiles }
                                 });
-                            } else if (!isDM && chatItem.group_chat) {
-                                const updatedRecentFiles = chatItem.group_chat.recent_files?.map(f =>
+                            } else if (!isDM && freshChat.group_chat) {
+                                const updatedRecentFiles = freshChat.group_chat.recent_files?.map(f =>
                                     f.file_id === file_id ? { ...f, deleted: deletedInfo } : f
                                 );
-                                await db.chatlist.update(chatItem.id, {
-                                    group_chat: {
-                                        ...chatItem.group_chat,
-                                        recent_deleted: deletedInfo,
-                                        recent_files: updatedRecentFiles
-                                    }
+                                await db.chatlist.update(freshChat.id, {
+                                    group_chat: { ...freshChat.group_chat, recent_deleted: deletedInfo, recent_files: updatedRecentFiles }
                                 });
                             }
                         }
@@ -782,35 +800,30 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         const existing = await table.get(message_id);
                         if (existing) {
                             await table.update(message_id, {
-                                deleted: {
-                                    message_id,
-                                    delete_type,
-                                    deleted_by,
-                                }
+                                deleted: { message_id, delete_type, deleted_by }
                             });
                         }
 
-                        // ── Update chatlist recent_deleted if needed ──────
-                        if (chatItem && recentContentId === message_id) {
+                        // Update chatlist recent_deleted if needed
+                        if (recentContentId === message_id && chatObj) {
                             const deletedInfo = { message_id, delete_type, deleted_by };
-                            if (isDM && chatItem.direct_message) {
-                                await db.chatlist.update(chatItem.id, {
-                                    direct_message: { ...chatItem.direct_message, recent_deleted: deletedInfo }
+                            if (isDM && freshChat.direct_message) {
+                                await db.chatlist.update(freshChat.id, {
+                                    direct_message: { ...freshChat.direct_message, recent_deleted: deletedInfo }
                                 });
-                            } else if (!isDM && chatItem.group_chat) {
-                                await db.chatlist.update(chatItem.id, {
-                                    group_chat: { ...chatItem.group_chat, recent_deleted: deletedInfo }
+                            } else if (!isDM && freshChat.group_chat) {
+                                await db.chatlist.update(freshChat.id, {
+                                    group_chat: { ...freshChat.group_chat, recent_deleted: deletedInfo }
                                 });
                             }
                         }
                     }
                 }
-            };
-
-            processDeletions();
+            })();
             return;
         }
     }, [lastChatMessage, chatId, currentUser]);
+
 
     // Clear local optimistic messages when switching chats
     React.useEffect(() => {

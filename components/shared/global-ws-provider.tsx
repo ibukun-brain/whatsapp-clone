@@ -347,6 +347,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             const fetchUnreadMessages = async () => {
                 const unreadGroupChatMessage = await db.groupmessagechats.filter((message) => message.receipt === "sent" && !message.isOptimistic).toArray()
                 const unreadGroupChatMessageIds = unreadGroupChatMessage.map((message) => message.id)
+                console.log("unread groupchamessageIds", unreadGroupChatMessageIds)
                 const unreadDM = await db.directmessagechats.filter((message) => !message.delivered_date && !message.isOptimistic).toArray()
                 const unreadDMIds = unreadDM.map((message) => message.id)
 
@@ -479,7 +480,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         if (chat) {
                             if (existing) {
                                 console.log('Updating existing direct message:', directChatMessage.id);
-                                
+
                                 // Merge files: preserve local blob URLs for existing files, 
                                 // but update their properties (like 'deleted') from the server.
                                 const mergedFiles = (directChatMessage.files || []).map(newFile => {

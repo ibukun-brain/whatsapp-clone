@@ -21,8 +21,9 @@ interface VoiceMessageProps {
   receipt?: React.ReactNode
   senderAvatar?: string | null
   senderName?: string | null
-  chatId?: string
-  isDM?: boolean
+  read_date?: Date | string | null
+  delivered_date?: Date | string | null
+  receiptStatus?: string | null
 }
 
 
@@ -70,10 +71,11 @@ function VoiceMessageComp({
   timestamp,
   isMine,
   receipt,
-  chatId,
-  isDM,
   senderAvatar,
   senderName,
+  read_date,
+  delivered_date,
+  receiptStatus,
 }: VoiceMessageProps) {
   const activeAudioId = useVoicePlaybackStore((s) => s.activeAudioId)
   const setActiveAudioId = useVoicePlaybackStore((s) => s.setActiveAudioId)
@@ -390,6 +392,9 @@ export default memo(VoiceMessageComp, (prev, next) => {
     prev.isMine === next.isMine &&
     prev.senderAvatar === next.senderAvatar &&
     prev.senderName === next.senderName &&
-    prev.id === next.id
+    prev.id === next.id &&
+    (prev.read_date ? new Date(prev.read_date).getTime() : 0) === (next.read_date ? new Date(next.read_date).getTime() : 0) &&
+    (prev.delivered_date ? new Date(prev.delivered_date).getTime() : 0) === (next.delivered_date ? new Date(next.delivered_date).getTime() : 0) &&
+    prev.receiptStatus === next.receiptStatus
   )
 })

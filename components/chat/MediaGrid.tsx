@@ -33,7 +33,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
   const filteredFiles = files.filter(f => {
     if (!f.deleted) return true;
     if (f.deleted.delete_type === "for_everyone") return false;
-    if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUserId) return false;
+    if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUserId)) return false;
     return true;
   });
 
@@ -253,7 +253,8 @@ export default memo(MediaGridComponent, (prevProps, nextProps) => {
       file.status === nextFile.status &&
       file.progress === nextFile.progress &&
       file.media_url === nextFile.media_url &&
-      file.caption === nextFile.caption
+      file.caption === nextFile.caption &&
+      JSON.stringify(file.deleted) === JSON.stringify(nextFile.deleted)
     )
   })
   if (!filesSame) console.log('MediaGrid memo fail: files same');

@@ -141,15 +141,10 @@ const MessageBubble = ({
         }
     };
 
-    const reactionItems = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
     const handleEnterSelectionMode = useCallback((id: string) => {
         onEnterSelectionMode?.(id);
     }, [onEnterSelectionMode]);
-
-    const handleToggleSelect = useCallback((id: string) => {
-        onToggleSelect?.(id);
-    }, [onToggleSelect]);
 
     const chatId = isDM ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id;
     const { cancelUpload, retryUpload } = useMediaUpload(chatId, { listen: false });
@@ -157,18 +152,16 @@ const MessageBubble = ({
 
     // deleted text computation
     const isDeleted = msg.deleted && msg.deleted !== null;
-    const isDeletedByMe = msg.deleted?.deleted_by === currentUser.id;
-    const isDeletedForMe = msg.deleted?.delete_type === "for_me";
+    const isDeletedByMe = msg.deleted?.deleted_by && String(msg.deleted.deleted_by) === String(currentUser.id);
     const isDeletedForEveryone = msg.deleted?.delete_type === "for_everyone";
 
     // effectively deleted computation (if all files or message is deleted)
     const allFilesDeletedForEveryone = msg.files && msg.files.length > 0 && msg.files.every(f => f.deleted && f.deleted.delete_type === "for_everyone");
-    const anyFileDeletedForEveryone = msg.files && msg.files.some(f => f.deleted && f.deleted.delete_type === "for_everyone");
-    const anyFileDeletedByMe = msg.files && msg.files.some(f => f.deleted && f.deleted.deleted_by === currentUser.id);
+    const anyFileDeletedByMe = msg.files && msg.files.some(f => f.deleted && String(f.deleted.deleted_by) === String(currentUser.id));
     const allFilesDeleted = msg.files && msg.files.length > 0 && msg.files.every(f => {
         if (!f.deleted) return false;
         if (f.deleted.delete_type === "for_everyone") return true;
-        if (f.deleted.delete_type === "for_me" && f.deleted.deleted_by === currentUser.id) return true;
+        if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return true;
         return false;
     });
 
@@ -194,7 +187,7 @@ const MessageBubble = ({
             if (isEffectivelyDeleted) return null;
 
             const forEveryone = f.deleted?.delete_type === "for_everyone";
-            const byMe = f.deleted?.deleted_by === currentUser.id;
+            const byMe = f.deleted?.deleted_by && String(f.deleted.deleted_by) === String(currentUser.id);
 
             let text = null;
             if (forEveryone) {
@@ -270,7 +263,12 @@ const MessageBubble = ({
         </div>
     );
 
-    const hasMainContent = !!(msg.content || (msg.files && msg.files.filter(f => !f.deleted || f.deleted.delete_type !== "for_everyone").length > 0) || msg.voice_message || (msg.attachments && (msg.attachments as Attachment[]).length > 0));
+    const hasMainContent = !!(msg.content || (msg.files && msg.files.filter(f => {
+        if (!f.deleted) return true;
+        if (f.deleted.delete_type === "for_everyone") return false;
+        if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return false;
+        return true;
+    }).length > 0) || msg.voice_message || (msg.attachments && (msg.attachments as Attachment[]).length > 0));
 
     const allRowsContent: { id: string; content: React.ReactNode }[] = [];
     if (deletedText || hasMainContent) {
@@ -335,8 +333,9 @@ const MessageBubble = ({
                                             receipt={isMine ? (isDM ? <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} /> : <ReadReceipt status={msg.status} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />) : undefined}
                                             senderName={senderName}
                                             senderAvatar={senderAvatar}
-                                            chatId={chatId}
-                                            isDM={isDM}
+                                            read_date={isDM ? (msg as DirectMessageChats).read_date : undefined}
+                                            delivered_date={isDM ? (msg as DirectMessageChats).delivered_date : undefined}
+                                            receiptStatus={!isDM ? (msg as GroupMessageChats).receipt : undefined}
                                         />
                                     </div>
                                 )}
