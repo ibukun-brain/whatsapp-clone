@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 
 import { Clock, AlertCircle } from "lucide-react";
+import { cmp } from "dexie";
 
 const ReadReceipt = ({
     read_date,
@@ -186,15 +187,13 @@ const MessageBubble = ({
         return (msg.files?.filter(f => f.deleted) || []).map(f => {
             if (isEffectivelyDeleted) return null;
 
+            // Only show deletion notes for "for_everyone" deletions.
+            // "for_me" deletions silently exclude the file from the grid — no placeholder.
             const forEveryone = f.deleted?.delete_type === "for_everyone";
-            const byMe = f.deleted?.deleted_by && String(f.deleted.deleted_by) === String(currentUser.id);
+            if (!forEveryone) return null;
 
-            let text = null;
-            if (forEveryone) {
-                text = byMe ? "You deleted this message" : "This message was deleted";
-            } else if (byMe) {
-                text = "You deleted this message";
-            }
+            const byMe = f.deleted?.deleted_by && String(f.deleted.deleted_by) === String(currentUser.id);
+            const text = byMe ? "You deleted this message" : "This message was deleted";
             if (!text) return null;
 
             // Individual bubble-like styling below the main message
@@ -297,6 +296,31 @@ const MessageBubble = ({
                                         {(msg.attachments as Attachment[]).map((att: Attachment) => <PdfAttachmentPreview key={att.id} attachment={att} />)}
                                     </div>
                                 )}
+
+                                {!isDM && !isMine && !isConsecutive && (
+                                    <div className="flex justify-between mb-0.5">
+                                        {(msg as GroupMessageChats).user.contact_id ? (
+                                            <span className={"text-xs capitalize"} style={{
+                                                color: (msg as GroupMessageChats).user.color_code
+                                            }}>
+                                                {(msg as GroupMessageChats).user.contact_name}
+                                            </span>
+                                        ) : (
+                                            <div className="flex items-baseline gap-1.5">
+                                                <span className={`text-xs capitalize`} style={{
+                                                    color: (msg as GroupMessageChats).user.color_code
+                                                }}>
+                                                    {(msg as GroupMessageChats).user.display_name}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {!(msg as GroupMessageChats).user.contact_id && (<span className={cn("text-[11px] text-muted-foreground", msg.voice_message && "absolute right-19.5")}>
+                                            {(msg as GroupMessageChats).user.phone}
+                                        </span>)}
+                                    </div>
+                                )}
+
+
                                 {msg.files && msg.files.length > 0 && (
                                     <div className="mb-1">
                                         <MediaGrid
@@ -319,7 +343,7 @@ const MessageBubble = ({
                                 )}
 
                                 {msg.voice_message && (
-                                    <div className={cn("mb-1", !isDM && "px-1")}>
+                                    <div className={cn("mb-1 -ml-3", !isDM && "px-1")}>
                                         <VoiceMessage
                                             id={msg.id}
                                             voice_message={msg.voice_message}
@@ -340,8 +364,9 @@ const MessageBubble = ({
                                     </div>
                                 )}
 
+
                                 {msg.content && (
-                                    <p className={`text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap pt-2.5`}>
+                                    <p className={`text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap pt-2.5 pb-1.5`}>
                                         {msg.content}
                                     </p>
                                 )}
@@ -351,7 +376,7 @@ const MessageBubble = ({
                                         {(msg as any).receipt === 'failed' && (
                                             <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform"><AlertCircle className="h-4 w-4 text-red-500" /></button>
                                         )}
-                                        <span className={`text-[11px] ${metaColor} leading-none`}>{time}</span>
+                                        <span className={cn`text-[11px] ${metaColor} leading-none`}>{time}</span>
                                         {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
                                     </div>
                                 )}

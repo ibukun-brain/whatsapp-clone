@@ -84,7 +84,6 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
     // We override dimensions if it's in a grid
     const className = size === 'full' ? 'w-full h-full' : 'w-[138px] h-[138px]'
 
-    const isSelected = isSelectionMode && msgId && selectedIds?.has(`${msgId}:${file.file_id}`);
 
     return (
       <div

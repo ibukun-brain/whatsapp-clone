@@ -124,9 +124,9 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     if (!message) return; // Added for type safety
 
     const fileData = data.files;
-    if (!fileData) return; 
+    if (!fileData) return;
 
-    
+
     // Handle Voice Message Update
     if (message.voice_message && message.type === 'voice_recording') {
       if (currentId !== data.message_id) {
@@ -219,19 +219,19 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       let tempFilesMimeType = file.type;
       let duration: number | undefined
       if (mediaType === 'audio' || mediaType === 'video') {
-         // Special handling for .mpeg or generic video mime types that might be audio
-         if (mediaType === 'video') {
-            const meta = await getVideoMetadata(file)
-            if (meta.width === 0 && meta.height === 0) {
-               console.log('Video mime type has no dimensions - treating as audio.')
-               mediaType = 'audio'
-               // Use a corrected mime type for the database and uploader metadata
-               tempFilesMimeType = 'audio/mpeg'
-            }
-            duration = meta.duration
-         } else {
-            duration = await getAudioDuration(file)
-         }
+        // Special handling for .mpeg or generic video mime types that might be audio
+        if (mediaType === 'video') {
+          const meta = await getVideoMetadata(file)
+          if (meta.width === 0 && meta.height === 0) {
+            console.log('Video mime type has no dimensions - treating as audio.')
+            mediaType = 'audio'
+            // Use a corrected mime type for the database and uploader metadata
+            tempFilesMimeType = 'audio/mpeg'
+          }
+          duration = meta.duration
+        } else {
+          duration = await getAudioDuration(file)
+        }
       }
 
       return {
@@ -289,9 +289,10 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       await db.groupmessagechats.put({
         id: dbId,
         groupchat_id: context.context_id,
-        user: currentUser,
+        user: {
+          ...currentUser,
+        },
         type: isVoice ? 'voice_recording' : 'media',
-        contact_name: currentUser.display_name,
         reply: null,
         content: '',
         depth: null,
@@ -329,10 +330,10 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           onProgress: async (progress) => {
             const msg = (await table.get(dbId)) || (await table.where('client_msg_id').equals(clientMsgId).first())
             if (!msg) return;
-            
+
             if (msg.type === 'voice_recording') {
-                await table.update(msg.id, { status: 'processing' });
-                return;
+              await table.update(msg.id, { status: 'processing' });
+              return;
             }
 
             if (msg && msg.files) {
@@ -347,9 +348,9 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
             if (!msg) return;
 
             if (msg.type === 'voice_recording') {
-                await table.update(msg.id, { status: 'processing' });
-                activeUploads.current.delete(tempFileId)
-                return;
+              await table.update(msg.id, { status: 'processing' });
+              activeUploads.current.delete(tempFileId)
+              return;
             }
 
             if (msg && msg.files) {
@@ -368,9 +369,9 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
             if (!msg) return;
 
             if (msg.type === 'voice_recording') {
-                await table.update(msg.id, { status: 'failed' });
-                activeUploads.current.delete(tempFileId)
-                return;
+              await table.update(msg.id, { status: 'failed' });
+              activeUploads.current.delete(tempFileId)
+              return;
             }
 
             if (msg && msg.files) {
@@ -401,7 +402,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     let targetFileId = fileId
     const table = chatType === 'directmessage' ? db.directmessagechats : db.groupmessagechats
     const msg = await table.get(messageId)
-    
+
     if (!targetFileId && msg?.type === 'voice_recording') {
       targetFileId = msg.voice_message_file_id || ''
     }
@@ -441,14 +442,14 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     // Handle Voice Recording Retry
     if (msg.type === 'voice_recording') {
       if (!msg.voice_message_blob) return
-      
+
       const tempFileId = `vretry-${Date.now()}`
       const controller = new AbortController()
       activeUploads.current.set(tempFileId, controller)
-      
-      await table.update(messageId, { 
-        status: 'uploading', 
-        voice_message_file_id: tempFileId 
+
+      await table.update(messageId, {
+        status: 'uploading',
+        voice_message_file_id: tempFileId
       })
 
       try {
@@ -465,15 +466,15 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           },
           signal: controller.signal,
           onProgress: async () => {
-             // No progress needed for simple voice records currently
+            // No progress needed for simple voice records currently
           },
           onComplete: async (uploadId) => {
             await table.update(messageId, { status: 'processing', id: uploadId || messageId })
             activeUploads.current.delete(tempFileId)
           },
           onError: async () => {
-             await table.update(messageId, { status: 'failed' })
-             activeUploads.current.delete(tempFileId)
+            await table.update(messageId, { status: 'failed' })
+            activeUploads.current.delete(tempFileId)
           }
         })
       } catch (err) {

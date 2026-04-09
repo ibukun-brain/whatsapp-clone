@@ -291,7 +291,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const filtered = unique.filter(m => {
             if (m.deleted && m.deleted.delete_type === "for_me" && String(m.deleted.deleted_by) === String(currentUser?.id)) return false;
 
-            // If all files are deleted 'for me' and there's no text content, hide the message
+            // If all files are deleted 'for me' and there's no text content, hide the message entirely
             if (m.files && m.files.length > 0 && !m.content) {
                 const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser?.id));
                 if (allDoneForMe) return false;
@@ -329,7 +329,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const filtered = unique.filter(m => {
             if (m.deleted && m.deleted.delete_type === "for_me" && String(m.deleted.deleted_by) === String(currentUser?.id)) return false;
 
-            // If all files are deleted 'for me' and there's no text content, hide the message
+            // If all files are deleted 'for me' and there's no text content, hide the message entirely
             if (m.files && m.files.length > 0 && !m.content) {
                 const allDoneForMe = m.files.every(f => f.deleted && f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser?.id));
                 if (allDoneForMe) return false;
@@ -728,6 +728,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     db.groupmessagechats.put(incomingMsg);
                 });
             if (currentUser?.id === incomingMsg.user.id) {
+                // instead of creating recipient for the sender of a message, create recipient for all other users in the group
+                // const recipients = recipients.filter(r => r.user_id !== currentUser?.id);
                 db.groupmessagechatrecipients.bulkPut(recipients.map(r => ({
                     ...r,
                     delivered_date: new Date(r.delivered_date),
@@ -762,10 +764,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
                     if (file_id) {
                         // 1. Handle specific file deletion within a message
-                        const existingMsg = await table.get(message_id);
+                        const existingMsg = await table.filter(m => m.files?.some(f => f.file_id === file_id) ?? false).first();
                         if (existingMsg && existingMsg.files) {
                             const updatedFiles = existingMsg.files.map(f => {
                                 if (f.file_id === file_id) {
+                                    if (f.deleted) return f; // Skip if already deleted
                                     return {
                                         ...f,
                                         deleted: { file_id, delete_type, deleted_by }
@@ -773,11 +776,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 }
                                 return f;
                             });
-                            await table.update(message_id, { files: updatedFiles });
+                            const hasChanged = JSON.stringify(updatedFiles) !== JSON.stringify(existingMsg.files);
+                            if (hasChanged) {
+                                await table.update(existingMsg.id, { files: updatedFiles });
+                            }
                         }
 
                         // Update chatlist recent_deleted if needed
-                        if (recentContentId === message_id && chatObj) {
+                        if (recentContentId === message_id && chatObj && !chatObj.recent_deleted) {
                             const deletedInfo = { file_id, delete_type, deleted_by };
                             if (isDM && freshChat.direct_message) {
                                 const updatedRecentFiles = freshChat.direct_message.recent_files?.map(f =>
@@ -798,14 +804,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     } else {
                         // 2. Handle full message deletion
                         const existing = await table.get(message_id);
-                        if (existing) {
+                        if (existing && !existing.deleted) {
                             await table.update(message_id, {
                                 deleted: { message_id, delete_type, deleted_by }
                             });
                         }
 
                         // Update chatlist recent_deleted if needed
-                        if (recentContentId === message_id && chatObj) {
+                        if (recentContentId === message_id && chatObj && !chatObj.recent_deleted) {
                             const deletedInfo = { message_id, delete_type, deleted_by };
                             if (isDM && freshChat.direct_message) {
                                 await db.chatlist.update(freshChat.id, {
@@ -886,9 +892,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             optimisticMsg = {
                 id: tempId,
                 groupchat_id: chatId,
-                user: currentUser,
+                user: {
+                    ...currentUser,
+                },
                 type: "text",
-                contact_name: currentUser.display_name,
                 reply: null,
                 content: text,
                 depth: null,

@@ -41,7 +41,7 @@ function parseDurationHMS(hms?: string | number): number {
 }
 
 // Generate a deterministic waveform from a file_id seed
-function generateWaveform(seed: string, bars: number = 42): number[] {
+function generateWaveform(seed: string, bars: number = 43): number[] {
   let hash = 0
   for (let i = 0; i < seed.length; i++) {
     const char = seed.charCodeAt(i)
@@ -93,7 +93,7 @@ function VoiceMessageComp({
   const audioUrl = voice_message || file?.media_url || file?.preview_url
 
   // Generate a stable waveform based on file_id or voice_message URL
-  const waveformBars = useMemo(() => generateWaveform(file?.file_id || voice_message || 'default', 42), [file?.file_id, voice_message])
+  const waveformBars = useMemo(() => generateWaveform(file?.file_id || voice_message || 'default', 43), [file?.file_id, voice_message])
 
   // Synchronize playback state with global store
   useEffect(() => {
@@ -231,11 +231,11 @@ function VoiceMessageComp({
 
   return (
     <div className={cn(
-      "flex min-w-[280px] max-w-[340px] items-center gap-2 pt-1 pb-3 px-1.5", !isMine ? "flex-row-reverse" : ""
+      "flex min-w-[280px] max-w-[340px] items-center gap-2 pt-1 pb-3", !isMine ? "flex-row-reverse" : ""
     )}>
       {/* Hidden Audio Element */}
       {audioUrl && isReady && (
-      <audio
+        <audio
           ref={audioRef}
           src={audioUrl}
           preload="auto"

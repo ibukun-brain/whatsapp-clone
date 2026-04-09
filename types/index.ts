@@ -14,6 +14,7 @@ export type User = {
   profile_pic: string | null;
   timezone: string;
   bio: string | null
+  color_code: string,
   unread_messages: number
 }
 
@@ -184,10 +185,12 @@ export type WSData = {
 export type GroupMessageChats = {
   id: string;
   groupchat_id: string;
-  user: User;
+  user: User & {
+    contact_name?: string;
+    contact_id?: string
+  };
   type: MessageType;
-  contact_name: string;
-  reply: {} | null;
+  reply?: {} | null;
   content: string;
   depth: number | null;
   forwarded: boolean;

@@ -449,7 +449,7 @@ export const SecondarySidebar = () => {
             chat.group_chat.recent_message_type = gm.type;
             chat.group_chat.recent_deleted = gm.deleted;
             chat.group_chat.recent_user_id = gm.user.id;
-            chat.group_chat.recent_user_display_name = gm.contact_name,
+            chat.group_chat.recent_user_display_name = gm.user.contact_name as string,
             chat.group_chat.receipt = gm.receipt;
             chat.group_chat.recent_voice_message = gm.voice_message;
             chat.group_chat.recent_voice_message_duration = gm.voice_message_duration;

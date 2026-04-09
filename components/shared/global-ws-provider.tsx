@@ -261,7 +261,6 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                 try {
                     // 1. Create new row in groupmessagerecipient table
                     await db.transaction('rw', db.groupmessagechatrecipients, db.groupmessagechats, async () => {
-                        // await db.groupmessagechatrecipients.bulkUpdate(recipients)
                         for (const recipient of recipients) {
                             const messageToUpdate = await db.groupmessagechats.filter(m => {
                                 return m.groupchat_id === groupchat_id && m.id === recipient.message_id && m.user.id === currentUser?.id;
@@ -345,12 +344,13 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
             // send an event to set every unread messages o delivered status when the user is online
             // only send this event if currentuser is not the online user
             const fetchUnreadMessages = async () => {
-                const unreadGroupChatMessage = await db.groupmessagechats.filter((message) => message.receipt === "sent" && !message.isOptimistic).toArray()
+                // or filter by messages where the user isn't the sender of the message
+                const unreadGroupChatMessage = await db.groupmessagechats.filter((message) => message.user.id !== currentUser?.id && message.receipt === "sent" && !message.isOptimistic && !message.deleted).toArray()
                 const unreadGroupChatMessageIds = unreadGroupChatMessage.map((message) => message.id)
                 console.log("unread groupchamessageIds", unreadGroupChatMessageIds)
-                const unreadDM = await db.directmessagechats.filter((message) => !message.delivered_date && !message.isOptimistic).toArray()
+                const unreadDM = await db.directmessagechats.filter((message) => !message.delivered_date && !message.isOptimistic && !message.deleted).toArray()
                 const unreadDMIds = unreadDM.map((message) => message.id)
-
+                if (unreadGroupChatMessageIds.length === 0 && unreadDMIds.length === 0) return;
                 sendJsonMessage({
                     type: "send_chat_message_delivery_broadcast",
                     data: {
@@ -358,7 +358,6 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                         unreadGroupChatMessageIds, // Sends unread group messages id to be updated as delivered
                         unreadDMIds // Send unread direct messages id to be updated as delivered
                     }
-
                 })
             }
 
