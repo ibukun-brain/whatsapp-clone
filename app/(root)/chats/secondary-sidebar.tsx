@@ -55,7 +55,7 @@ import { chatCategories } from "@/lib/utils";
 import { db } from "@/lib/indexdb";
 import { axiosInstance } from "@/lib/axios";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
-import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults, DirectMessageChats, GroupMessageChats } from "@/types";
+import { ChatResults, ContactResults, UserSettings, User, DirectMessageChatsResults, GroupMessageChatsResults, DirectMessageChats, GroupMessageChats, DirectMessageName } from "@/types";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Badge } from "@/components/ui/badge";
 import { useTypingStore, type userTypingType } from "@/lib/stores/typing-store";
@@ -162,8 +162,6 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
     ? null
     : !isMine && chat.group_chat?.recent_user_display_name ? (
       <span>{chat.group_chat.recent_user_display_name}:{" "}</span>
-    ) : isMine && !chat.group_chat ? (
-      <span>You:{" "}</span>
     ) : null;
 
   if (voiceMessage) {
@@ -450,7 +448,7 @@ export const SecondarySidebar = () => {
             chat.group_chat.recent_deleted = gm.deleted;
             chat.group_chat.recent_user_id = gm.user.id;
             chat.group_chat.recent_user_display_name = gm.user.contact_name as string,
-            chat.group_chat.receipt = gm.receipt;
+              chat.group_chat.receipt = gm.receipt;
             chat.group_chat.recent_voice_message = gm.voice_message;
             chat.group_chat.recent_voice_message_duration = gm.voice_message_duration;
           }
@@ -762,7 +760,12 @@ export const SecondarySidebar = () => {
                       </div>
                       <div>
                         <p className="text-secondary-foreground text-base">
-                          {typeof chat.name === "string" ? chat.name : (chat.name?.contact_name || chat.name?.display_name)}
+                          {typeof chat.name === "string" ? chat.name : (
+                            <>
+                              {(chat.name as DirectMessageName).contact_name || (chat.name as DirectMessageName).display_name}
+                              {(chat.name as DirectMessageName).contact_user_id && (chat.name as DirectMessageName).contact_user_id === currentUser?.id && " (You)"}
+                            </>
+                          )}
                         </p>
                         <div className="max-w-[370px]">
                           <p className="truncate whitespace-nowrap">

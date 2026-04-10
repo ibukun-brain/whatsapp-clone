@@ -23,13 +23,15 @@ type GroupMessageUserInfo = {
     onlineUsersCount?: number
 }
 
-const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, timezone }: {
+const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, groupMembers, timezone, currentUserId }: {
     directMessageUserInfo: DirectMessageUserInfo | null,
     groupMessageInfo: GroupMessageUserInfo | null,
     onOpenInfo?: () => void,
     groupMembers?: GroupMember[],
     timezone?: string,
+    currentUserId?: string,
 }) => {
+    const isSelfChat = !!(currentUserId && directMessageUserInfo && directMessageUserInfo.userId === currentUserId);
     const [showContactHint, setShowContactHint] = React.useState(true)
     const [showGroupHint, setShowGroupHint] = React.useState(true)
     const [showOnlineCountDelayed, setShowOnlineCountDelayed] = React.useState(false)
@@ -70,7 +72,18 @@ const ChatHeader = ({ directMessageUserInfo, groupMessageInfo, onOpenInfo, group
                             </span>
                             <div className="relative h-4">
                                 <AnimatePresence mode="wait">
-                                    {showContactHint ? (
+                                    {isSelfChat ? (
+                                        <motion.span
+                                            key="self"
+                                            initial={{ y: 10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-0 left-0 text-[12px] font-normal text-[#54656f] whitespace-nowrap"
+                                        >
+                                            Message yourself
+                                        </motion.span>
+                                    ) : showContactHint ? (
                                         <motion.span
                                             key="hint"
                                             initial={{ y: 10, opacity: 0 }}

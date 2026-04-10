@@ -54,6 +54,7 @@ export type DirectMessage = {
   is_online?: boolean;
   name: {
     contact_name: string,
+    contact_user_id?: string,
     display_name: string
   }
   recent_voice_message?: string;
@@ -97,6 +98,7 @@ export type GroupChatDetail = {
 export type DirectMessageName = {
   contact_name: string
   display_name: string
+  contact_user_id?: string
 }
 
 export type Chat = {

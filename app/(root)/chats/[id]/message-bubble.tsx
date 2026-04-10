@@ -159,16 +159,16 @@ const MessageBubble = ({
     // effectively deleted computation (if all files or message is deleted)
     const allFilesDeletedForEveryone = msg.files && msg.files.length > 0 && msg.files.every(f => f.deleted && f.deleted.delete_type === "for_everyone");
     const anyFileDeletedByMe = msg.files && msg.files.some(f => f.deleted && String(f.deleted.deleted_by) === String(currentUser.id));
-    const allFilesDeleted = msg.files && msg.files.length > 0 && msg.files.every(f => {
-        if (!f.deleted) return false;
-        if (f.deleted.delete_type === "for_everyone") return true;
-        if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return true;
-        return false;
-    });
+    // const allFilesDeleted = msg.files && msg.files.length > 0 && msg.files.every(f => {
+    //     if (!f.deleted) return false;
+    //     if (f.deleted.delete_type === "for_everyone") return true;
+    //     if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return true;
+    //     return false;
+    // });
 
     const effectivelyDeletedForEveryone = isDeletedForEveryone || allFilesDeletedForEveryone;
     const effectivelyDeletedByMe = isDeletedByMe || (!msg.content && anyFileDeletedByMe) || (isDeletedForEveryone && isDeletedByMe) || (allFilesDeletedForEveryone && anyFileDeletedByMe);
-    const effectivelyDeleted = isDeleted || allFilesDeleted;
+    const effectivelyDeleted = isDeleted
 
     const isEffectivelyDeletedForEveryone = effectivelyDeletedForEveryone;
     const isEffectivelyDeletedByMe = effectivelyDeletedByMe;
@@ -287,7 +287,7 @@ const MessageBubble = ({
                     <div className={cn(
                         "relative max-w-[72%] min-w-[200px] shadow-sm cursor-default group",
                         bubbleClass,
-                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1 pb-0" : "px-2.5 py-0.5"
+                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-2.5"
                     )}>
                         {deletedBubbleContent || (
                             <div className="flex flex-col">
@@ -366,7 +366,7 @@ const MessageBubble = ({
 
 
                                 {msg.content && (
-                                    <p className={`text-[14.5px] ${textColor} leading-0 whitespace-pre-wrap pt-2.5 pb-1.5`}>
+                                    <p className={`text-[14.5px] ${textColor} leading-normal whitespace-pre-wrap`}>
                                         {msg.content}
                                     </p>
                                 )}
@@ -376,7 +376,7 @@ const MessageBubble = ({
                                         {(msg as any).receipt === 'failed' && (
                                             <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform"><AlertCircle className="h-4 w-4 text-red-500" /></button>
                                         )}
-                                        <span className={cn`text-[11px] ${metaColor} leading-none`}>{time}</span>
+                                        <span className={cn`text-[11px] ${metaColor} leading-none pb-0.5`}>{time}</span>
                                         {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
                                     </div>
                                 )}

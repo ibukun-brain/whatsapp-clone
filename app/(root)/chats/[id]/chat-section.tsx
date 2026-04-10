@@ -629,18 +629,37 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
 
     // Check if "Delete for everyone" should be available
-    // (Only if ALL selected messages are from the current user)
+    // (Only if ALL selected messages are from the current user AND < 2 days old)
     const canDeleteForEveryone = useMemo(() => {
         if (selectedMessageIds.size === 0) return false;
         const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
+        const userTz = currentUser?.timezone || "UTC";
+
+        // Current timestamp adjusted to user's timezone
+        const nowStr = new Date().toLocaleString("en-US", { timeZone: userTz });
+        const currentTimestampTz = new Date(nowStr).getTime();
+        
+        const twoDaysInMillis = 2 * 24 * 60 * 60 * 1000;
+
         return Array.from(selectedMessageIds).every(id => {
             const msgId = id.includes(":") ? id.split(":")[0] : id;
             const msg = messages.find(m => m.id === msgId);
             if (!msg) return false;
             const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
-            return msgUserId === currentUser?.id;
+            
+            if (msgUserId !== currentUser?.id) return false;
+
+            // Message timestamp adjusted to user's timezone
+            const msgStr = new Date(msg.timestamp as string | Date).toLocaleString("en-US", { timeZone: userTz });
+            const msgTimestampTz = new Date(msgStr).getTime();
+
+            if (currentTimestampTz - msgTimestampTz >= twoDaysInMillis) {
+                return false;
+            }
+
+            return true;
         });
-    }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, chatType]);
+    }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, currentUser?.timezone, chatType]);
 
     const handleMediaViewerDeleteRequest = useCallback((msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => {
         const newSelection = new Set<string>();
@@ -754,7 +773,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             (async () => {
                 for (const item of deleteData.deleted) {
                     const { delete_type, deleted_by, message_id, file_id } = item;
-                    if (!message_id) continue;
+                    // if (!message_id) continue;
                     const freshChat = await db.chatlist.filter(chat => chat.group_chat?.id === chatId || chat.direct_message?.id === chatId).first();
                     if (!freshChat) continue;
                     const isDM = freshChat.chat_type === "directmessage";
@@ -765,6 +784,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     if (file_id) {
                         // 1. Handle specific file deletion within a message
                         const existingMsg = await table.filter(m => m.files?.some(f => f.file_id === file_id) ?? false).first();
+                        console.log(existingMsg)
                         if (existingMsg && existingMsg.files) {
                             const updatedFiles = existingMsg.files.map(f => {
                                 if (f.file_id === file_id) {
@@ -777,6 +797,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 return f;
                             });
                             const hasChanged = JSON.stringify(updatedFiles) !== JSON.stringify(existingMsg.files);
+                            console.log(hasChanged)
                             if (hasChanged) {
                                 await table.update(existingMsg.id, { files: updatedFiles });
                             }
@@ -801,7 +822,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 });
                             }
                         }
-                    } else {
+                    } else if (message_id) {
                         // 2. Handle full message deletion
                         const existing = await table.get(message_id);
                         if (existing && !existing.deleted) {
@@ -1405,6 +1426,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         }
                         groupMembers={groupMembers}
                         timezone={currentUser?.timezone}
+                        currentUserId={currentUser?.id}
                     />
 
                     {/* ── Messages + Footer + Upload Preview wrapper ── */}

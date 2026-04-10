@@ -30,9 +30,9 @@ export default function RootLayout({
       <body
         className={`${notoSans.variable} antialiased bg-[#fcf5eb] text-[#111b21]`}
       >
-        {/* <SerwistProvider swUrl="/sw.js"> */}
-        <Providers>{children}</Providers>
-        {/* </SerwistProvider> */}
+        <SerwistProvider swUrl="/sw.js">
+          <Providers>{children}</Providers>
+        </SerwistProvider>
         <Toaster position="top-right" />
       </body>
     </html>
