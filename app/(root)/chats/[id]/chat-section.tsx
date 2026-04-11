@@ -43,7 +43,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { file } from "zod";
 
 
 // ─── Sub-components ────────────────────────────────────────────────
@@ -672,6 +671,24 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
     }, [confirmDeleteForMe, confirmDeleteForEveryone]);
 
+    const handleEditMessage = useCallback((msgId: string, newContent: string) => {
+        if (!currentUser) return;
+        const isDM = chatType === "directmessage";
+        const table = isDM ? db.directmessagechats : db.groupmessagechats;
+        
+        // Optimistic update
+        table.update(msgId, { content: newContent });
+
+        sendChatMessage({
+            type: chatType,
+            data: {
+                action: "edit",
+                message_id: msgId,
+                content: newContent
+            }
+        });
+    }, [chatType, currentUser, sendChatMessage]);
+
     // Reset selection mode when switching chats
     React.useEffect(() => {
         handleExitSelectionMode();
@@ -844,6 +861,35 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 });
                             }
                         }
+                    }
+                }
+            })();
+            return;
+        }
+
+        // 5. Message edit
+        if ((msg.type === "directmessage" || msg.type === "groupchat") && msg.action === "edit" && msg.data) {
+            const editData = msg.data as { message_id: string, content: string };
+            const isDM = msg.type === "directmessage";
+            const table = isDM ? db.directmessagechats : db.groupmessagechats;
+            
+            table.update(editData.message_id, { content: editData.content, edited: true });
+
+            (async () => {
+                const freshChat = await db.chatlist.filter(chat => chat.group_chat?.id === chatId || chat.direct_message?.id === chatId).first();
+                if (!freshChat) return;
+                const chatObj = isDM ? freshChat.direct_message : freshChat.group_chat;
+                const recentContentId = chatObj?.recent_content_id;
+
+                if (recentContentId === editData.message_id) {
+                    if (isDM && freshChat.direct_message) {
+                        await db.chatlist.update(freshChat.id, {
+                            direct_message: { ...freshChat.direct_message, recent_content: editData.content}
+                        });
+                    } else if (!isDM && freshChat.group_chat) {
+                        await db.chatlist.update(freshChat.id, {
+                            group_chat: { ...freshChat.group_chat, recent_content: editData.content}
+                        });
                     }
                 }
             })();
@@ -1471,6 +1517,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 peerName={!directMessage?.direct_message?.name?.contact_name.startsWith("+")
                                                     ? directMessage?.direct_message?.name?.contact_name
                                                     : directMessage?.direct_message?.name?.display_name}
+                                                onEditMessage={handleEditMessage}
                                             />
                                         </React.Fragment>
                                     );
@@ -1508,6 +1555,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 onToggleSelect={handleToggleSelect}
                                                 onEnterSelectionMode={handleEnterSelectionMode}
                                                 onMediaViewerDeleteRequest={handleMediaViewerDeleteRequest}
+                                                onEditMessage={handleEditMessage}
                                             />
                                         </React.Fragment>
                                     );

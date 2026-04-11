@@ -29,11 +29,19 @@ import {
     MessageCircle,
     MessageSquareQuote,
     Ban,
+    Pen,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Clock, AlertCircle } from "lucide-react";
-import { cmp } from "dexie";
+import { Clock, AlertCircle, Smile, Check } from "lucide-react";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 const ReadReceipt = ({
     read_date,
@@ -104,7 +112,8 @@ const MessageBubble = ({
     onEnterSelectionMode,
     onMediaViewerDeleteRequest,
     peerAvatar,
-    peerName
+    peerName,
+    onEditMessage
 }: {
     msg: DirectMessageChats | GroupMessageChats,
     currentUser: User,
@@ -121,10 +130,11 @@ const MessageBubble = ({
     onMediaViewerDeleteRequest?: (msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => void,
     peerAvatar?: string | null,
     peerName?: string | null,
+    onEditMessage?: (msgId: string, content: string) => void,
 }) => {
     const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
     const senderAvatar = isMine ? currentUser.profile_pic : (isDM ? peerAvatar : (msg.user as User)?.profile_pic);
-    const senderName = isMine ? currentUser.display_name : (isDM ? peerName : (msg.user as User)?.display_name);
+    const senderName = isMine ? currentUser.display_name : (isDM ? peerName : ((msg as GroupMessageChats).user?.contact_name || (msg as GroupMessageChats).user?.display_name || (msg as GroupMessageChats).user?.phone));
 
     const displayTimestamp = (msg.files && msg.files.length > 0) ? msg.files[0].timestamp : msg.timestamp;
     const { time } = getDateTimeByTimezone(displayTimestamp, currentUser.timezone);
@@ -159,12 +169,6 @@ const MessageBubble = ({
     // effectively deleted computation (if all files or message is deleted)
     const allFilesDeletedForEveryone = msg.files && msg.files.length > 0 && msg.files.every(f => f.deleted && f.deleted.delete_type === "for_everyone");
     const anyFileDeletedByMe = msg.files && msg.files.some(f => f.deleted && String(f.deleted.deleted_by) === String(currentUser.id));
-    // const allFilesDeleted = msg.files && msg.files.length > 0 && msg.files.every(f => {
-    //     if (!f.deleted) return false;
-    //     if (f.deleted.delete_type === "for_everyone") return true;
-    //     if (f.deleted.delete_type === "for_me" && String(f.deleted.deleted_by) === String(currentUser.id)) return true;
-    //     return false;
-    // });
 
     const effectivelyDeletedForEveryone = isDeletedForEveryone || allFilesDeletedForEveryone;
     const effectivelyDeletedByMe = isDeletedByMe || (!msg.content && anyFileDeletedByMe) || (isDeletedForEveryone && isDeletedByMe) || (allFilesDeletedForEveryone && anyFileDeletedByMe);
@@ -206,10 +210,13 @@ const MessageBubble = ({
                         rowId={`${msg.id}:${f.file_id}`}
                         msg={msg}
                         isMine={isMine}
+                        timestamp={time}
                         isDM={isDM}
                         onShowInfo={onShowInfo}
                         onEnterSelectionMode={handleEnterSelectionMode}
                         handleCopy={handleCopy}
+                        senderName={senderName}
+                        onEdit={(content) => onEditMessage?.(msg.id, content)}
                     >
                         <div className={cn(
                             "flex items-center gap-1.5 min-w-[200px] px-2 py-1.5 rounded-lg shadow-sm border border-black/5 mt-1 animate-in fade-in zoom-in-95 duration-200",
@@ -278,21 +285,24 @@ const MessageBubble = ({
                     minimal={!!deletedText}
                     rowId={msg.id}
                     msg={msg}
+                    timestamp={time}
                     isMine={isMine}
                     isDM={isDM}
                     onShowInfo={onShowInfo}
                     onEnterSelectionMode={handleEnterSelectionMode}
                     handleCopy={handleCopy}
+                    senderName={senderName}
+                    onEdit={(content) => onEditMessage?.(msg.id, content)}
                 >
                     <div className={cn(
-                        "relative max-w-[72%] min-w-[200px] shadow-sm cursor-default group",
+                        "relative max-w-[250px] shadow-sm cursor-default group",
                         bubbleClass,
-                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-2.5"
+                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-2.5 py-1.5"
                     )}>
                         {deletedBubbleContent || (
                             <div className="flex flex-col">
                                 {msg.attachments && (msg.attachments as Attachment[]).length > 0 && (
-                                    <div className="flex flex-col gap-1 mb-1">
+                                    <div className="flex flex-col mb-1">
                                         {(msg.attachments as Attachment[]).map((att: Attachment) => <PdfAttachmentPreview key={att.id} attachment={att} />)}
                                     </div>
                                 )}
@@ -366,17 +376,28 @@ const MessageBubble = ({
 
 
                                 {msg.content && (
-                                    <p className={`text-[14.5px] ${textColor} leading-normal whitespace-pre-wrap`}>
+                                    <div className={`text-[14.5px] ${textColor} leading-normal whitespace-pre-wrap wrap-break-words [word-break:break-word] relative`}>
                                         {msg.content}
-                                    </p>
+                                        <span className={cn("inline-block h-1", msg.edited ? "w-[110px]" : "w-[72px]")} />
+                                        <span className="absolute right-0 bottom-0 inline-flex items-center gap-1 h-4 translate-y-0.5">
+                                            {(msg as any).receipt === 'failed' && (
+                                                <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform">
+                                                    <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                                                </button>
+                                            )}
+                                            {msg.edited && <span className={cn("text-[11px]", metaColor, "leading-none mr-0")}>Edited</span>}
+                                            <span className={cn("text-[11px]", metaColor, "leading-none")}>{time}</span>
+                                            {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
+                                        </span>
+                                    </div>
                                 )}
 
-                                {(!hasVisuals || msg.content) && (
+                                {!msg.content && !hasVisuals && (
                                     <div className={"flex items-center justify-end gap-1 mt-auto"}>
                                         {(msg as any).receipt === 'failed' && (
                                             <button onClick={() => onRetryMessage?.(msg)} className="hover:scale-110 transition-transform"><AlertCircle className="h-4 w-4 text-red-500" /></button>
                                         )}
-                                        <span className={cn`text-[11px] ${metaColor} leading-none pb-0.5`}>{time}</span>
+                                        <span className={cn("text-[11px]", metaColor, "leading-none pb-0.5")}>{time}</span>
                                         {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
                                     </div>
                                 )}
@@ -468,135 +489,217 @@ const MessageContextMenu = ({
     minimal = false,
     rowId,
     msg,
+    timestamp,
     isMine,
     isDM,
     onShowInfo,
     onEnterSelectionMode,
-    handleCopy
+    handleCopy,
+    senderName,
+    onEdit
 }: {
     children: React.ReactNode,
     minimal?: boolean,
     rowId: string,
     msg: DirectMessageChats | GroupMessageChats,
+    timestamp: string,
     isMine: boolean,
     isDM: boolean,
     onShowInfo?: (msg: GroupMessageChats) => void,
     onEnterSelectionMode?: (id: string) => void,
-    handleCopy: () => void
+    handleCopy: () => void,
+    senderName: string | null | undefined,
+    onEdit?: (content: string) => void
 }) => {
     const reactionItems = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
-    const senderName = !isMine ? (isDM ? "Contact" : (msg.user as User)?.display_name || "Unknown") : null;
+    const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
+    const [editedText, setEditedText] = React.useState(msg.content || "");
+
+    const handleUpdate = () => {
+        if (editedText.trim() === "") return;
+        onEdit?.(editedText);
+        setIsEditDialogOpen(false);
+    };
 
     return (
-        <ContextMenu>
-            <ContextMenuTrigger asChild>
-                {children}
-            </ContextMenuTrigger>
-            <ContextMenuContent className="w-72 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 animate-in fade-in zoom-in duration-200 z-50">
-                {!minimal && (
-                    <>
-                        {/* Reactions Section */}
-                        <div className="flex items-center justify-between px-2 py-2 mb-1">
-                            {reactionItems.map((emoji) => (
-                                <button key={emoji} className="text-2xl hover:scale-125 transition-transform duration-200 px-1">
-                                    {emoji}
-                                </button>
-                            ))}
-                            <button className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center hover:bg-gray-100 border border-gray-100 transition-colors">
-                                <Plus size={20} className="text-gray-500" />
-                            </button>
-                        </div>
-
-                        <ContextMenuSeparator className="bg-gray-100 mb-1" />
-                    </>
-                )}
-
-                <div className="space-y-0.5">
+        <>
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    {children}
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-72 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 animate-in fade-in zoom-in duration-200 z-50">
                     {!minimal && (
                         <>
-                            {isMine && !isDM && (
-                                <ContextMenuItem
-                                    onSelect={() => onShowInfo?.(msg as GroupMessageChats)}
-                                    className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
-                                >
-                                    <Info size={18} className="text-gray-400" />
-                                    <span>Message info</span>
-                                </ContextMenuItem>
-                            )}
+                            {/* Reactions Section */}
+                            <div className="flex items-center justify-between px-2 py-2 mb-1">
+                                {reactionItems.map((emoji) => (
+                                    <button key={emoji} className="text-2xl hover:scale-125 transition-transform duration-200 px-1">
+                                        {emoji}
+                                    </button>
+                                ))}
+                                <button className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center hover:bg-gray-100 border border-gray-100 transition-colors">
+                                    <Plus size={20} className="text-gray-500" />
+                                </button>
+                            </div>
 
-                            <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                <Reply size={18} className="text-gray-400" />
-                                <span>Reply</span>
-                            </ContextMenuItem>
-
-                            {!isMine && (
-                                <>
-                                    <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                        <MessageSquareQuote size={18} className="text-gray-400" />
-                                        <span>Reply privately</span>
-                                    </ContextMenuItem>
-
-                                    <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                        <MessageCircle size={18} className="text-gray-400" />
-                                        <span>Message {senderName}</span>
-                                    </ContextMenuItem>
-                                </>
-                            )}
-
-                            <ContextMenuItem
-                                onSelect={handleCopy}
-                                className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
-                            >
-                                <Copy size={18} className="text-gray-400" />
-                                <span>Copy</span>
-                            </ContextMenuItem>
-
-                            <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                <Forward size={18} className="text-gray-400" />
-                                <span>Forward</span>
-                            </ContextMenuItem>
-
-                            <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                <Pin size={18} className="text-gray-400" />
-                                <span>Pin</span>
-                            </ContextMenuItem>
-
-                            <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                                <Star size={18} className="text-gray-400" />
-                                <span>Star</span>
-                            </ContextMenuItem>
-
-                            <ContextMenuSeparator className="bg-gray-100 my-1" />
+                            <ContextMenuSeparator className="bg-gray-100 mb-1" />
                         </>
                     )}
 
-                    <ContextMenuItem
-                        onSelect={() => onEnterSelectionMode?.(rowId)}
-                        className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
-                    >
-                        <CheckSquare size={18} className="text-gray-400" />
-                        <span>Select</span>
-                    </ContextMenuItem>
+                    <div className="space-y-0.5">
+                        {!minimal && (
+                            <>
+                                {isMine && !isDM && (
+                                    <ContextMenuItem
+                                        onSelect={() => onShowInfo?.(msg as GroupMessageChats)}
+                                        className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
+                                    >
+                                        <Info size={18} className="text-gray-400" />
+                                        <span>Message info</span>
+                                    </ContextMenuItem>
+                                )}
 
-                    {!minimal && <ContextMenuSeparator className="bg-gray-100 my-1" />}
+                                <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                    <Reply size={18} className="text-gray-400" />
+                                    <span>Reply</span>
+                                </ContextMenuItem>
 
-                    {!minimal && !isMine && (
-                        <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
-                            <ThumbsDown size={18} className="text-gray-400" />
-                            <span>Report</span>
+                                {!isMine && (
+                                    <>
+                                        <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                            <MessageSquareQuote size={18} className="text-gray-400" />
+                                            <span>Reply privately</span>
+                                        </ContextMenuItem>
+
+                                        <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                            <MessageCircle size={18} className="text-gray-400" />
+                                            <span>Message {senderName}</span>
+                                        </ContextMenuItem>
+                                    </>
+                                )}
+
+                                <ContextMenuItem
+                                    onSelect={handleCopy}
+                                    className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
+                                >
+                                    <Copy size={18} className="text-gray-400" />
+                                    <span>Copy</span>
+                                </ContextMenuItem>
+                                <ContextMenuSeparator className="bg-gray-100 my-1" />
+
+                                <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                    <Forward size={18} className="text-gray-400" />
+                                    <span>Forward</span>
+                                </ContextMenuItem>
+
+                                {isMine && (
+                                    <ContextMenuItem
+                                        onSelect={() => {
+                                            setEditedText(msg.content || "");
+                                            setIsEditDialogOpen(true);
+                                        }}
+                                        className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
+                                    >
+                                        <Pen size={18} className="text-gray-400" />
+                                        <span>Edit</span>
+                                    </ContextMenuItem>
+                                )}
+
+                                <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                    <Pin size={18} className="text-gray-400" />
+                                    <span>Pin</span>
+                                </ContextMenuItem>
+                                <ContextMenuSeparator className="bg-gray-100 my-1" />
+
+                                <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                    <Star size={18} className="text-gray-400" />
+                                    <span>Star</span>
+                                </ContextMenuItem>
+
+                            </>
+                        )}
+
+                        <ContextMenuItem
+                            onSelect={() => onEnterSelectionMode?.(rowId)}
+                            className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
+                        >
+                            <CheckSquare size={18} className="text-gray-400" />
+                            <span>Select</span>
                         </ContextMenuItem>
-                    )}
 
-                    <ContextMenuItem
-                        onSelect={() => onEnterSelectionMode?.(rowId)}
-                        className="flex items-center gap-3 px-3 py-2 text-[15px] text-red-500 hover:bg-red-50 rounded-lg cursor-pointer transition-colors focus:bg-red-50 outline-none"
-                    >
-                        <Trash2 size={18} className="text-red-400" />
-                        <span>Delete</span>
-                    </ContextMenuItem>
-                </div>
-            </ContextMenuContent>
-        </ContextMenu>
+                        {!minimal && <ContextMenuSeparator className="bg-gray-100 my-1" />}
+
+                        {!minimal && !isMine && (
+                            <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                <ThumbsDown size={18} className="text-gray-400" />
+                                <span>Report</span>
+                            </ContextMenuItem>
+                        )}
+
+                        <ContextMenuItem
+                            onSelect={() => onEnterSelectionMode?.(rowId)}
+                            className="flex items-center gap-3 px-3 py-2 text-[15px] text-red-500 hover:bg-red-50 rounded-lg cursor-pointer transition-colors focus:bg-red-50 outline-none"
+                        >
+                            <Trash2 size={18} className="text-red-400" />
+                            <span>Delete</span>
+                        </ContextMenuItem>
+                    </div>
+                </ContextMenuContent>
+            </ContextMenu>
+
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent className="bg-white max-w-[500px] py-0 px-5 overflow-hidden border-none rounded-[16px] gap-0">
+                    <DialogHeader className="py-4 flex flex-row items-center gap-4">
+                        <DialogTitle className="text-[19px] font-medium text-[#111b21]">Edit message</DialogTitle>
+                    </DialogHeader>
+
+                    <div className="relative h-[250px] rounded-lg w-full bg-[#efeae2] chat-bg-doodle flex items-center justify-center p-6 bg-repeat">
+                        <div className={cn(
+                            "relative shadow-sm px-2.5 py-1.5 rounded-lg max-w-[250px] bg-[#d9fdd3]"
+                        )}>
+                            <div className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap wrap-break-words [word-break:break-word] relative">
+                                {msg.content}
+                                <span className={cn("inline-block h-1", msg.edited ? "w-[110px]" : "w-[72px]")} />
+                                <span className="absolute right-0 bottom-0 inline-flex items-center gap-0.5 h-4 translate-y-0.5">
+                                    <span className="text-[11px] text-[#667781] leading-none">{msg.edited && <span className="mr-1">Edited</span>}{timestamp}</span>
+                                    {isMine && (isDM ? <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} read_date={(msg as DirectMessageChats)?.read_date} delivered_date={(msg as DirectMessageChats)?.delivered_date} receipt={(msg as any).receipt} /> : <ReadReceipt status={msg.status} files={msg.files as MediaFile[]} isOptimistic={msg.isOptimistic} receipt={(msg as GroupMessageChats).receipt} />)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-white flex items-center gap-3">
+                        <div className="flex-1 relative flex items-center">
+                            <Textarea
+                                value={editedText}
+                                onChange={(e) => setEditedText(e.target.value)}
+                                className="w-full min-h-[24px] max-h-[150px] resize-none border-none py-3 selection-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[16px] pl-0 pr-12 placeholder-[#8696a0] selection:bg-[#00a884] selection:text-dark scrollbar-hide"
+                                placeholder="Edit message"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleUpdate();
+                                    }
+                                }}
+                            />
+                            <div className="absolute right-12 flex items-center gap-2">
+                                <button className="text-[#8696a0] hover:text-[#54656f] transition-colors">
+                                    <Smile size={24} />
+                                </button>
+                            </div>
+                            <div className="absolute bottom-[-4px] left-0 right-0 h-[2px] bg-[#00a884]" />
+                            <button
+                                onClick={handleUpdate}
+                                className="w-9 h-9 bg-[#00a884] rounded-full flex items-center justify-center text-white shadow-md hover:bg-[#06cf9c] transition-all transform active:scale-95 shrink-0"
+                            >
+                                <Check size={22} strokeWidth={3} />
+                            </button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 };
 
