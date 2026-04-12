@@ -2,7 +2,7 @@ import React, { useCallback } from "react";
 import { CheckIcon1, CheckIcon2 } from "@/components/icons/chats-icon";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone, cn } from "@/lib/utils";
-import { Attachment, DirectMessageChats, GroupMessageChats, User } from "@/types";
+import { Attachment, DirectMessageChats, DirectMessageName, GroupMessageChats, User } from "@/types";
 import PdfAttachmentPreview from "./pdf-attachment-preview";
 import MediaGrid from "@/components/chat/MediaGrid";
 import { useMediaUpload } from "@/hooks/use-media-upload";
@@ -113,7 +113,9 @@ const MessageBubble = ({
     onMediaViewerDeleteRequest,
     peerAvatar,
     peerName,
-    onEditMessage
+    onEditMessage,
+    onReplyMessage,
+    onScrollToMessage
 }: {
     msg: DirectMessageChats | GroupMessageChats,
     currentUser: User,
@@ -131,8 +133,10 @@ const MessageBubble = ({
     peerAvatar?: string | null,
     peerName?: string | null,
     onEditMessage?: (msgId: string, content: string) => void,
+    onReplyMessage?: (msg: DirectMessageChats | GroupMessageChats) => void,
+    onScrollToMessage?: (msgId: string) => void,
 }) => {
-    const isMine = isDM ? msg.user === currentUser.id : (msg.user as User)?.id === currentUser.id;
+    const isMine = isDM ? msg.user.id === currentUser.id : (msg.user as User)?.id === currentUser.id;
     const senderAvatar = isMine ? currentUser.profile_pic : (isDM ? peerAvatar : (msg.user as User)?.profile_pic);
     const senderName = isMine ? currentUser.display_name : (isDM ? peerName : ((msg as GroupMessageChats).user?.contact_name || (msg as GroupMessageChats).user?.display_name || (msg as GroupMessageChats).user?.phone));
 
@@ -217,6 +221,7 @@ const MessageBubble = ({
                         handleCopy={handleCopy}
                         senderName={senderName}
                         onEdit={(content) => onEditMessage?.(msg.id, content)}
+                        onReply={() => onReplyMessage?.(msg)}
                     >
                         <div className={cn(
                             "flex items-center gap-1.5 min-w-[200px] px-2 py-1.5 rounded-lg shadow-sm border border-black/5 mt-1 animate-in fade-in zoom-in-95 duration-200",
@@ -293,22 +298,20 @@ const MessageBubble = ({
                     handleCopy={handleCopy}
                     senderName={senderName}
                     onEdit={(content) => onEditMessage?.(msg.id, content)}
+                    onReply={() => onReplyMessage?.(msg)}
                 >
-                    <div className={cn(
-                        "relative max-w-[250px] shadow-sm cursor-default group",
+                    <div 
+                        id={`msg-${msg.id}`}
+                        data-grouped-ids={(msg as any).groupedIds?.join(',')}
+                        className={cn(
+                        "relative max-w-[400px] shadow-sm cursor-default group",
                         bubbleClass,
-                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-2.5 py-1.5"
+                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-1 py-1.5"
                     )}>
                         {deletedBubbleContent || (
                             <div className="flex flex-col">
-                                {msg.attachments && (msg.attachments as Attachment[]).length > 0 && (
-                                    <div className="flex flex-col mb-1">
-                                        {(msg.attachments as Attachment[]).map((att: Attachment) => <PdfAttachmentPreview key={att.id} attachment={att} />)}
-                                    </div>
-                                )}
-
                                 {!isDM && !isMine && !isConsecutive && (
-                                    <div className="flex justify-between mb-0.5">
+                                    <div className="flex justify-between gap-2 mb-0.5">
                                         {(msg as GroupMessageChats).user.contact_id ? (
                                             <span className={"text-xs capitalize"} style={{
                                                 color: (msg as GroupMessageChats).user.color_code
@@ -327,6 +330,44 @@ const MessageBubble = ({
                                         {!(msg as GroupMessageChats).user.contact_id && (<span className={cn("text-[11px] text-muted-foreground", msg.voice_message && "absolute right-19.5")}>
                                             {(msg as GroupMessageChats).user.phone}
                                         </span>)}
+                                    </div>
+                                )}
+
+                                {msg.reply && (
+                                    <div
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onScrollToMessage?.((msg.reply as any).id);
+                                        }}
+                                        className="flex flex-col bg-black/5 rounded-lg pl-2.5 pr-2 py-1.5 relative overflow-hidden mb-1 border-l-4 mt-0.5 cursor-pointer"
+                                        style={{ borderColor: (msg as any).reply.user?.color_code ? `color-mix(in srgb, ${(msg as any).reply.user.color_code} 75%, black)` : '#043b9e' }}
+                                    >
+                                        <span
+                                            className="text-[12.5px] font-medium truncate capitalize mb-0.5"
+                                            style={{ color: (msg as any).reply.user?.color_code || '#0852dd' }}
+                                        >
+                                            {(msg as any).reply.user?.id === currentUser?.id ? "You" :
+                                                (isDM ? peerName : (
+                                                    <>
+                                                        {(msg as any).reply.user?.contact_id ? (msg as any).reply.user?.contact_name : (msg as any).reply.user?.display_name}
+                                                        {!(msg as any).reply.user?.contact_id && (
+                                                            <span className="text-muted-foreground ml-1">
+                                                                {(msg as any).reply.user?.phone}
+                                                            </span>
+                                                        )}
+                                                    </>
+                                                ))
+                                            }
+                                        </span>
+                                        <span className="text-[13px] text-[#667781] line-clamp-3 overflow-hidden text-ellipsis wrap-break-words [word-break:break-word]">
+                                            {(msg as any).reply.content || ((msg as any).reply.files?.length ? "Photo" : ((msg as any).reply.voice_message ? "Voice message" : "Message"))}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {msg.attachments && (msg.attachments as Attachment[]).length > 0 && (
+                                    <div className="flex flex-col mb-1">
+                                        {(msg.attachments as Attachment[]).map((att: Attachment) => <PdfAttachmentPreview key={att.id} attachment={att} />)}
                                     </div>
                                 )}
 
@@ -496,7 +537,8 @@ const MessageContextMenu = ({
     onEnterSelectionMode,
     handleCopy,
     senderName,
-    onEdit
+    onEdit,
+    onReply
 }: {
     children: React.ReactNode,
     minimal?: boolean,
@@ -509,11 +551,16 @@ const MessageContextMenu = ({
     onEnterSelectionMode?: (id: string) => void,
     handleCopy: () => void,
     senderName: string | null | undefined,
-    onEdit?: (content: string) => void
+    onEdit?: (content: string) => void,
+    onReply?: () => void
 }) => {
     const reactionItems = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
     const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
     const [editedText, setEditedText] = React.useState(msg.content || "");
+    const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+
+    const msgDate = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+    const isEditable = isMine && msgDate > 0 && (Date.now() - msgDate <= 5 * 60 * 1000);
 
     const handleUpdate = () => {
         if (editedText.trim() === "") return;
@@ -523,7 +570,7 @@ const MessageContextMenu = ({
 
     return (
         <>
-            <ContextMenu>
+            <ContextMenu onOpenChange={setIsMenuOpen}>
                 <ContextMenuTrigger asChild>
                     {children}
                 </ContextMenuTrigger>
@@ -559,7 +606,10 @@ const MessageContextMenu = ({
                                     </ContextMenuItem>
                                 )}
 
-                                <ContextMenuItem className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none">
+                                <ContextMenuItem
+                                    onSelect={onReply}
+                                    className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
+                                >
                                     <Reply size={18} className="text-gray-400" />
                                     <span>Reply</span>
                                 </ContextMenuItem>
@@ -592,7 +642,7 @@ const MessageContextMenu = ({
                                     <span>Forward</span>
                                 </ContextMenuItem>
 
-                                {isMine && (
+                                {isEditable && (
                                     <ContextMenuItem
                                         onSelect={() => {
                                             setEditedText(msg.content || "");
@@ -655,7 +705,7 @@ const MessageContextMenu = ({
 
                     <div className="relative h-[250px] rounded-lg w-full bg-[#efeae2] chat-bg-doodle flex items-center justify-center p-6 bg-repeat">
                         <div className={cn(
-                            "relative shadow-sm px-2.5 py-1.5 rounded-lg max-w-[250px] bg-[#d9fdd3]"
+                            "relative shadow-sm px-1 py-1.5 rounded-lg max-w-[250px] bg-[#d9fdd3]"
                         )}>
                             <div className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap wrap-break-words [word-break:break-word] relative">
                                 {msg.content}

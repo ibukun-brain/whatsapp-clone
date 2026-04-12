@@ -150,10 +150,39 @@ export function useScrollManager({
         }, 50);
     }, []);
 
+    // ── Scroll to message ID (e.g. for reply navigation) ──────────────
+    const scrollToMessageId = useCallback((msgId: string) => {
+        let element = document.getElementById(`msg-${msgId}`);
+        
+        // Fallback: search for synth grouped message bubbles that contain this ID
+        if (!element) {
+            element = document.querySelector(`[data-grouped-ids*="${msgId}"]`);
+        }
+
+        if (element && scrollContainerRef.current) {
+            const container = scrollContainerRef.current;
+            const elementRect = element.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            // Calculate position relative to container
+            const relativeTop = element.offsetTop;
+            
+            // Scroll with some padding at the top
+            container.scrollTo({
+                top: relativeTop - 100,
+                behavior: 'smooth'
+            });
+
+            return element;
+        }
+        return null;
+    }, []);
+
     return {
         scrollContainerRef,
         bottomAnchorRef,
         handleScroll,
         scrollToBottom,
+        scrollToMessageId,
     };
 }

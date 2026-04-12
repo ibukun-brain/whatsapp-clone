@@ -62,6 +62,22 @@
       width: 40%;
     }
   }
+
+  @keyframes reply-highlight {
+    0% {
+      background-color: transparent;
+    }
+    30% {
+      background-color: #3b82f633;
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+}
+
+@utility animate-reply-highlight {
+  animation: reply-highlight 1.5s ease-in-out;
 }
 
 @utility animate-progress-loading {

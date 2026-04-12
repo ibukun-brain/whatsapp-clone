@@ -140,8 +140,11 @@ export type Attachment = {
 export type DirectMessageChats = {
   id: string;
   direct_message_id: string;
-  user: string;
-  reply: null;
+  user: {
+    id: string;
+    color_code: string;
+  };
+  reply?: any | null;
   content: string;
   type: MessageType;
   depth: number | null;
@@ -192,7 +195,7 @@ export type GroupMessageChats = {
     contact_id?: string
   };
   type: MessageType;
-  reply?: {} | null;
+  reply?: any | null;
   content: string;
   depth: number | null;
   forwarded: boolean;

@@ -176,6 +176,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const [selectedMessageIds, setSelectedMessageIds] = React.useState<Set<string>>(new Set());
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
 
+    const [replyMessage, setReplyMessage] = React.useState<DirectMessageChats | GroupMessageChats | null>(null);
+
+    const handleReplyMessage = useCallback((msg: DirectMessageChats | GroupMessageChats) => {
+        setReplyMessage(msg);
+        setTimeout(() => {
+            inputRef.current?.focus();
+        }, 0);
+    }, []);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -632,33 +640,27 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     const canDeleteForEveryone = useMemo(() => {
         if (selectedMessageIds.size === 0) return false;
         const messages = chatType === 'groupchat' ? processedGroupMessages : processedDirectMessages;
-        const userTz = currentUser?.timezone || "UTC";
 
-        // Current timestamp adjusted to user's timezone
-        const nowStr = new Date().toLocaleString("en-US", { timeZone: userTz });
-        const currentTimestampTz = new Date(nowStr).getTime();
-        
         const twoDaysInMillis = 2 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
 
         return Array.from(selectedMessageIds).every(id => {
             const msgId = id.includes(":") ? id.split(":")[0] : id;
             const msg = messages.find(m => m.id === msgId);
             if (!msg) return false;
+
             const msgUserId = typeof msg.user === 'object' && msg.user !== null ? (msg.user as User).id : (msg.user as unknown as string);
-            
             if (msgUserId !== currentUser?.id) return false;
 
-            // Message timestamp adjusted to user's timezone
-            const msgStr = new Date(msg.timestamp as string | Date).toLocaleString("en-US", { timeZone: userTz });
-            const msgTimestampTz = new Date(msgStr).getTime();
+            const msgTimestamp = new Date(msg.timestamp as string | Date).getTime();
 
-            if (currentTimestampTz - msgTimestampTz >= twoDaysInMillis) {
+            if (now - msgTimestamp > twoDaysInMillis) {
                 return false;
             }
 
             return true;
         });
-    }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, currentUser?.timezone, chatType]);
+    }, [selectedMessageIds, processedGroupMessages, processedDirectMessages, currentUser?.id, chatType]);
 
     const handleMediaViewerDeleteRequest = useCallback((msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => {
         const newSelection = new Set<string>();
@@ -675,7 +677,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (!currentUser) return;
         const isDM = chatType === "directmessage";
         const table = isDM ? db.directmessagechats : db.groupmessagechats;
-        
+
         // Optimistic update
         table.update(msgId, { content: newContent });
 
@@ -704,12 +706,30 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         bottomAnchorRef,
         handleScroll,
         scrollToBottom,
+        scrollToMessageId,
     } = useScrollManager({
         chatId,
         messagesLength,
         scrollToFirstUnread,
         hasUnreadBanner: isUnreadBannerVisible,
     });
+
+    const handleScrollToMessage = useCallback((msgId: string) => {
+        const element = scrollToMessageId(msgId);
+        if (element) {
+            // Find the actual bubble div inside the element if needed, 
+            // but we added the ID to the bubble div itself.
+            element.classList.remove('animate-reply-highlight');
+            // Trigger reflow to restart animation
+            void element.offsetWidth; 
+            element.classList.add('animate-reply-highlight');
+            
+            // Optional: remove class after animation ends
+            setTimeout(() => {
+                element.classList.remove('animate-reply-highlight');
+            }, 2000);
+        }
+    }, [scrollToMessageId]);
     // Handle incoming per-chat WebSocket events (send / edit / delete / reply).
     React.useEffect(() => {
         if (!lastChatMessage) return;
@@ -732,14 +752,14 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
 
         // 2. Direct message send
-        if (msg.type === "directmessage" && msg.action === "send" && msg.data) {
+        if (msg.type === "directmessage" && (msg.action === "send" || msg.action === "reply") && msg.data) {
             const incomingMsg = msg.data as DirectMessageChats;
             setLocalOptimisticMessages(prev => prev.filter(m =>
                 m.client_msg_id ? m.client_msg_id !== incomingMsg.client_msg_id : m.content !== incomingMsg.content
             ));
             db.directmessagechats
                 .where('direct_message_id').equals(chatId)
-                .and(m => (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || (m.user === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content))
+                .and(m => (m.client_msg_id && m.client_msg_id === incomingMsg.client_msg_id) || (m.user.id === currentUser?.id && m.isOptimistic === true && m.content === incomingMsg.content))
                 .delete()
                 .then(() => {
                     db.directmessagechats.put(incomingMsg);
@@ -748,7 +768,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
 
         // 3. Group chat message send
-        if (msg.type === "groupchat" && msg.action === "send" && msg.data) {
+        if (msg.type === "groupchat" && (msg.action === "send" || msg.action === "reply") && msg.data) {
             const incomingMsg = (msg.data as WSData).groupchat_messages;
             const recipients = (msg.data as WSData).groupchat_message_recipients;
             setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
@@ -872,7 +892,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             const editData = msg.data as { message_id: string, content: string };
             const isDM = msg.type === "directmessage";
             const table = isDM ? db.directmessagechats : db.groupmessagechats;
-            
+
             table.update(editData.message_id, { content: editData.content, edited: true });
 
             (async () => {
@@ -884,11 +904,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 if (recentContentId === editData.message_id) {
                     if (isDM && freshChat.direct_message) {
                         await db.chatlist.update(freshChat.id, {
-                            direct_message: { ...freshChat.direct_message, recent_content: editData.content}
+                            direct_message: { ...freshChat.direct_message, recent_content: editData.content }
                         });
                     } else if (!isDM && freshChat.group_chat) {
                         await db.chatlist.update(freshChat.id, {
-                            group_chat: { ...freshChat.group_chat, recent_content: editData.content}
+                            group_chat: { ...freshChat.group_chat, recent_content: editData.content }
                         });
                     }
                 }
@@ -938,8 +958,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             optimisticMsg = {
                 id: tempId,
                 direct_message_id: chatId,
-                user: currentUser.id,
-                reply: null,
+                user: { id: currentUser.id, color_code: currentUser.color_code },
+                reply: replyMessage || null,
                 content: text,
                 files: [],
                 type: "text",
@@ -963,7 +983,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     ...currentUser,
                 },
                 type: "text",
-                reply: null,
+                reply: replyMessage || null,
                 content: text,
                 depth: null,
                 forwarded: false,
@@ -980,13 +1000,28 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             db.groupmessagechats.put(optimisticMsg as GroupMessageChats);
         }
 
-        sendChatMessage({
-            type: chatType,
-            data: {
-                action: "send",
-                message: { text, client_msg_id: (optimisticMsg as any)?.client_msg_id },
-            },
-        });
+        if (replyMessage) {
+            sendChatMessage({
+                type: chatType,
+                data: {
+                    action: "reply",
+                    message: {
+                        message_id: replyMessage.id,
+                        content: text,
+                        client_msg_id: clientMsgId
+                    },
+                },
+            });
+            setReplyMessage(null);
+        } else {
+            sendChatMessage({
+                type: chatType,
+                data: {
+                    action: "send",
+                    message: { text, client_msg_id: clientMsgId },
+                },
+            });
+        }
 
 
         // Clear input, draft, and stop typing indicator
@@ -1003,7 +1038,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (chatItemIdRef.current) {
             db.chatlist.update(chatItemIdRef.current, { draft: null });
         }
-    }, [currentUser, chatType, chatId, sendChatMessage, stopTyping]);
+    }, [currentUser, chatType, chatId, sendChatMessage, stopTyping, replyMessage]);
 
     const handleRetryMessage = useCallback(async (msg: DirectMessageChats | GroupMessageChats) => {
         // 1. Ensure client_msg_id exists
@@ -1514,10 +1549,12 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 onEnterSelectionMode={handleEnterSelectionMode}
                                                 onMediaViewerDeleteRequest={handleMediaViewerDeleteRequest}
                                                 peerAvatar={directMessage?.direct_message?.image}
-                                                peerName={!directMessage?.direct_message?.name?.contact_name.startsWith("+")
-                                                    ? directMessage?.direct_message?.name?.contact_name
-                                                    : directMessage?.direct_message?.name?.display_name}
+                                                peerName={directMessage?.direct_message?.dm_user_id !== currentUser?.id
+                                                    ? ((directMessage?.name as DirectMessageName)?.contact_name || (directMessage?.name as DirectMessageName)?.display_name)
+                                                    : "You"}
                                                 onEditMessage={handleEditMessage}
+                                                onReplyMessage={handleReplyMessage}
+                                                onScrollToMessage={handleScrollToMessage}
                                             />
                                         </React.Fragment>
                                     );
@@ -1556,6 +1593,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                                 onEnterSelectionMode={handleEnterSelectionMode}
                                                 onMediaViewerDeleteRequest={handleMediaViewerDeleteRequest}
                                                 onEditMessage={handleEditMessage}
+                                                onReplyMessage={handleReplyMessage}
+                                                onScrollToMessage={handleScrollToMessage}
                                             />
                                         </React.Fragment>
                                     );
@@ -1636,156 +1675,202 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 </button>
                             </footer>
                         ) : (
-                            <footer className="flex items-center px-2 py-2 bg-transparent border-none">
-                                <div className="flex items-center flex-1 bg-white rounded-[24px] px-1.5 py-1 gap-1 shadow-sm min-h-[46px]">
-                                    {isRecording ? (
-                                        <VoiceRecorder
-                                            onStop={handleVoiceRecordingStop}
-                                            onCancel={handleVoiceRecordingCancel}
-                                            onDraft={handleVoiceDraft}
-                                            onPause={handleVoiceRecordingPause}
-                                            onResume={handleVoiceRecordingResume}
-                                            draftBlob={voiceDraftBlob}
-                                            draftDuration={voiceDraftDuration}
-                                            draftMimeType={voiceDraftMimeType}
-                                        />
-                                    ) : (
-                                        <>
-                                            {/* Plus (attach) */}
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer outline-none">
-                                                        <AttachmentPlusIcon
-                                                            style={{ width: "24px", height: "24px" }}
-                                                            className="text-[#54656f]"
-                                                        />
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent
-                                                    side="top"
-                                                    align="start"
-                                                    className="mb-4 w-48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                            <footer className="flex items-end px-2 py-2 bg-transparent border-none w-full max-w-full">
+                                <div className="flex flex-col flex-1 bg-white rounded-[24px] px-1.5 pb-1 gap-0 shadow-sm overflow-hidden min-h-[46px]">
+                                    {replyMessage && (
+                                        <div className="flex animate-in fade-in slide-in-from-bottom-2 duration-200 pt-1.5 px-1.5 w-full">
+                                            <div className="flex flex-1 items-start bg-background-secondary rounded-lg pl-3 pr-2 py-2 relative overflow-hidden border-l-4" style={{ borderColor: replyMessage.user?.color_code ? `color-mix(in srgb, ${replyMessage.user.color_code} 75%, black)` : '#043b9e' }}>
+                                                <div className="flex flex-col flex-1 min-w-0 pr-6">
+                                                    <div className="text-[13px] font-medium truncate capitalize mb-0.5">
+                                                        {chatType === 'directmessage' ? (
+                                                            <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>
+                                                                {replyMessage.user.id === currentUser?.id ? "You" : ((directMessage?.name as DirectMessageName)?.contact_name || (directMessage?.name as DirectMessageName)?.display_name || "User")}
+                                                            </span>
+                                                        ) : (
+                                                            replyMessage.user.id === currentUser?.id ? (
+                                                                <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>You</span>
+                                                            ) : (
+                                                                <>
+                                                                    <span style={{ color: (replyMessage as GroupMessageChats).user?.color_code || '#0852dd' }}>
+                                                                        {(replyMessage as GroupMessageChats).user?.contact_id
+                                                                            ? (replyMessage as GroupMessageChats).user?.contact_name
+                                                                            : (replyMessage as GroupMessageChats).user?.display_name
+                                                                        }
+                                                                    </span>
+                                                                    {!(replyMessage as GroupMessageChats).user?.contact_id && (
+                                                                        <span className="text-muted-foreground ml-1">
+                                                                            {(replyMessage as GroupMessageChats).user?.phone}
+                                                                        </span>
+                                                                    )}
+                                                                </>
+                                                            )
+                                                        )}
+                                                    </div>
+                                                    <span className="text-[13.5px] text-[#667781] truncate">
+                                                        {replyMessage.content || (replyMessage.files?.length ? "Photo" : (replyMessage.voice_message ? "Voice message" : "Message"))}
+                                                    </span>
+                                                </div>
+
+                                                <button
+                                                    onClick={() => setReplyMessage(null)}
+                                                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors absolute right-2 top-1/2 -translate-y-1/2"
                                                 >
-                                                    <DropdownMenuItem
-                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                        onClick={() => fileInputRef.current?.click()}
-                                                    >
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <FileText size={20} className="text-[#7f66ff]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Document</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem
-                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                        onClick={() => mediaInputRef.current?.click()}
-                                                    >
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <ImageIcon size={20} className="text-[#007bfc]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Photos & videos</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <Camera size={20} className="text-[#ff2e74]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Camera</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem
-                                                        onClick={() => audioInputRef.current?.click()}
-                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                    >
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <Headphones size={20} className="text-[#ff7f35]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Audio</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem
-                                                        onClick={() => setIsContactModalOpen(true)}
-                                                        className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                    >
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <UserIcon size={20} className="text-[#0695cc]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Contact</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <BarChart2 size={20} className="text-[#ffbc38]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Poll</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <Calendar size={20} className="text-[#ff2e74]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">Event</span>
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                            <StickyNote size={20} className="text-[#00a884]" />
-                                                        </div>
-                                                        <span className="text-[14.5px] font-normal">New sticker</span>
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-                                            {/* Emoji */}
-                                            <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer">
-                                                <EmojiIcon
-                                                    style={{ width: "24px", height: "24px" }}
-                                                    className="text-[#54656f]"
-                                                />
-                                            </button>
-
-                                            {/* Text Input */}
-                                            <div className="flex-1 px-1">
-                                                <textarea
-                                                    ref={inputRef}
-                                                    rows={1}
-                                                    placeholder="Type a message"
-                                                    className="w-full border-none bg-transparent py-[9px] text-[15.5px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
-                                                    style={{ maxHeight: 120, overflow: "hidden" }}
-                                                    onChange={handleInputChange}
-                                                    onKeyDown={handleTyping}
-                                                />
+                                                    <X size={20} className="text-dark font-bold" />
+                                                </button>
                                             </div>
-
-                                            {/* Mic / Send */}
-                                            <button
-                                                onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
-                                                onClick={hasText ? handleSendMessage : startRecording}
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer group ${hasText ? "hover:bg-[#f0f2f5]" : "hover:bg-[#00a884]"
-                                                    }`}
-                                            >
-                                                <span
-                                                    className="transition-all duration-150"
-                                                    style={{
-                                                        display: "inline-flex",
-                                                        transform: hasText ? "scale(1.05) rotate(0deg)" : "scale(1) rotate(0deg)",
-                                                    }}
-                                                >
-                                                    {hasText ? (
-                                                        <SendIcon
-                                                            style={{ width: "24px", height: "24px" }}
-                                                            className="text-[#54656f]"
-                                                        />
-                                                    ) : (
-                                                        <MicrophoneIcon
-                                                            style={{ width: "24px", height: "24px" }}
-                                                            className="text-[#54656f] group-hover:text-white"
-                                                        />
-                                                    )}
-                                                </span>
-                                            </button>
-                                        </>
+                                        </div>
                                     )}
+
+                                    <div className="flex items-end flex-1 bg-white pt-1 gap-1 min-h-[46px]">
+                                        {isRecording ? (
+                                            <VoiceRecorder
+                                                onStop={handleVoiceRecordingStop}
+                                                onCancel={handleVoiceRecordingCancel}
+                                                onDraft={handleVoiceDraft}
+                                                onPause={handleVoiceRecordingPause}
+                                                onResume={handleVoiceRecordingResume}
+                                                draftBlob={voiceDraftBlob}
+                                                draftDuration={voiceDraftDuration}
+                                                draftMimeType={voiceDraftMimeType}
+                                            />
+                                        ) : (
+                                            <>
+                                                {/* Plus (attach) */}
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer outline-none">
+                                                            <AttachmentPlusIcon
+                                                                style={{ width: "24px", height: "24px" }}
+                                                                className="text-[#54656f]"
+                                                            />
+                                                        </button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent
+                                                        side="top"
+                                                        align="start"
+                                                        className="mb-4 w-48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                                                    >
+                                                        <DropdownMenuItem
+                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                            onClick={() => fileInputRef.current?.click()}
+                                                        >
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <FileText size={20} className="text-[#7f66ff]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Document</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem
+                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                            onClick={() => mediaInputRef.current?.click()}
+                                                        >
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <ImageIcon size={20} className="text-[#007bfc]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Photos & videos</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <Camera size={20} className="text-[#ff2e74]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Camera</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem
+                                                            onClick={() => audioInputRef.current?.click()}
+                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                        >
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <Headphones size={20} className="text-[#ff7f35]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Audio</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem
+                                                            onClick={() => setIsContactModalOpen(true)}
+                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                        >
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <UserIcon size={20} className="text-[#0695cc]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Contact</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <BarChart2 size={20} className="text-[#ffbc38]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Poll</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <Calendar size={20} className="text-[#ff2e74]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">Event</span>
+                                                        </DropdownMenuItem>
+
+                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                <StickyNote size={20} className="text-[#00a884]" />
+                                                            </div>
+                                                            <span className="text-[14.5px] font-normal">New sticker</span>
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+
+                                                {/* Emoji */}
+                                                <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer">
+                                                    <EmojiIcon
+                                                        style={{ width: "24px", height: "24px" }}
+                                                        className="text-[#54656f]"
+                                                    />
+                                                </button>
+
+                                                {/* Text Input */}
+                                                <div className="flex-1 px-1">
+                                                    <textarea
+                                                        ref={inputRef}
+                                                        rows={1}
+                                                        placeholder="Type a message"
+                                                        className="w-full border-none bg-transparent py-[9px] text-[15.5px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
+                                                        style={{ maxHeight: 120, overflow: "hidden" }}
+                                                        onChange={handleInputChange}
+                                                        onKeyDown={handleTyping}
+                                                    />
+                                                </div>
+
+                                                {/* Mic / Send */}
+                                                <button
+                                                    onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
+                                                    onClick={hasText ? handleSendMessage : startRecording}
+                                                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer group ${hasText ? "hover:bg-[#f0f2f5]" : "hover:bg-[#00a884]"
+                                                        }`}
+                                                >
+                                                    <span
+                                                        className="transition-all duration-150"
+                                                        style={{
+                                                            display: "inline-flex",
+                                                            transform: hasText ? "scale(1.05) rotate(0deg)" : "scale(1) rotate(0deg)",
+                                                        }}
+                                                    >
+                                                        {hasText ? (
+                                                            <SendIcon
+                                                                style={{ width: "24px", height: "24px" }}
+                                                                className="text-[#54656f]"
+                                                            />
+                                                        ) : (
+                                                            <MicrophoneIcon
+                                                                style={{ width: "24px", height: "24px" }}
+                                                                className="text-[#54656f] group-hover:text-white"
+                                                            />
+                                                        )}
+                                                    </span>
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             </footer>
                         )}
