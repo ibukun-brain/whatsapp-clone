@@ -10,12 +10,12 @@ export default function RootLayout({
   return (
     <MediaViewerProvider>
       <SidebarProvider
-      // className="w-100"
-      // style={
-      //   {
-      //     "--sidebar-width": "629px",
-      //   } as React.CSSProperties
-      // }
+        className="lg:[--sidebar-width-dynamic:429px] xl:[--sidebar-width-dynamic:629px]"
+        style={
+          {
+            "--sidebar-width": "var(--sidebar-width-dynamic, 429px)",
+          } as React.CSSProperties
+        }
       >
         {children}
       </SidebarProvider>

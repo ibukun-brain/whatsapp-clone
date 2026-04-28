@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import Image from "next/image";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import {
     MicrophoneIcon,
@@ -8,15 +9,15 @@ import {
     AttachmentPlusIcon,
     SendIcon,
 } from "@/components/icons/chats-icon";
-import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Mic } from "lucide-react";
+import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Mic, Play, ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/indexdb";
+import { db, markMentionsSeen } from "@/lib/indexdb";
 import { formatDatetime, getDateLabel, getDateTimeByTimezone, formatDuration } from "@/lib/utils";
 import ChatHeader from "./chat-header";
-import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, Chat, GroupMessageChatRecipients, WSData } from "@/types";
+import { DirectMessageName, GroupMember, GroupMemberResults, GroupChatDetail, DMGroupsInCommon, DMGroupsInCommonResults, DirectMessageChats, GroupMessageChats, User, GroupMessageChatRecipients, WSData } from "@/types";
 import { MediaFile } from "@/types/mediaTypes";
 import MessageBubble from "./message-bubble";
 import ContactInfo from "./contact-info";
@@ -35,6 +36,17 @@ import { ContactSelectModal } from "./contact-select-modal";
 import { Contact } from "@/types";
 import { toast } from "sonner";
 import { useMediaUpload } from "@/hooks/use-media-upload";
+import { MentionPicker, type MentionPickerSelection } from "./mention-picker";
+import { ComposerMention, MentionInput, MentionQuery, toMentionInput } from "@/types/mentions";
+import {
+    getEditorText,
+    getCursorOffset,
+    setCursorOffset,
+    getSelectionOffsetRange,
+    renderEditorContent,
+    getOffsetRect,
+    renderContentWithMentions,
+} from "@/lib/utils/mentions";
 
 import {
     AlertDialog,
@@ -55,6 +67,7 @@ const DateSeparator = React.memo(({ label }: { label: string }) => (
     </div>
 ));
 DateSeparator.displayName = "DateSeparator";
+
 
 const UnreadBanner = React.memo(React.forwardRef<HTMLDivElement, { count: number }>(({ count }, ref) => (
     <div ref={ref} className="flex justify-center my-3 bg-background-secondary py-1.5">
@@ -178,6 +191,11 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     const [replyMessage, setReplyMessage] = React.useState<DirectMessageChats | GroupMessageChats | null>(null);
 
+    // ── Mention picker state ─────────────────────────────────────────
+    const [mentionQuery, setMentionQuery] = React.useState<MentionQuery | null>(null);
+    const [mentionLeftOffset, setMentionLeftOffset] = React.useState<number>(0);
+    const mentionAnchorRef = useRef<HTMLDivElement>(null);
+
     const handleReplyMessage = useCallback((msg: DirectMessageChats | GroupMessageChats) => {
         setReplyMessage(msg);
         setTimeout(() => {
@@ -208,6 +226,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
     // ── Determine chat type ──────────────────────────────────────────
     const chatType = groupMessage ? "groupchat" : directMessage ? "directmessage" : null;
+    const isDM = chatType === "directmessage";
 
     // ── WebSocket (per-chat) ──────────────────────────────────────────
     // Handles send / edit / delete / reply for THIS chat only.
@@ -673,20 +692,31 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         }
     }, [confirmDeleteForMe, confirmDeleteForEveryone]);
 
-    const handleEditMessage = useCallback((msgId: string, newContent: string) => {
+    const handleEditMessage = useCallback((msgId: string, newContent: string, mentions: ComposerMention[] = []) => {
         if (!currentUser) return;
         const isDM = chatType === "directmessage";
         const table = isDM ? db.directmessagechats : db.groupmessagechats;
 
-        // Optimistic update
-        table.update(msgId, { content: newContent });
+        // Optimistic update — store the inbound shape (`member` object, null for @all).
+        table.update(msgId, {
+            content: newContent,
+            mentions: mentions.map((m) => ({
+                mention_type: m.mention_type,
+                member: m.member ? { id: m.member.id, user_id: m.member.user_id } : null,
+                name: m.name,
+                offset: m.offset,
+                length: m.length,
+            })),
+        });
 
+        // Wire payload — only `member_id` per the backend contract.
         sendChatMessage({
             type: chatType,
             data: {
                 action: "edit",
                 message_id: msgId,
-                content: newContent
+                content: newContent,
+                mentions: mentions.map(toMentionInput),
             }
         });
     }, [chatType, currentUser, sendChatMessage]);
@@ -714,6 +744,123 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         hasUnreadBanner: isUnreadBannerVisible,
     });
 
+    // ── Scroll-to-bottom FAB ────────────────────────────────────────
+    // Show the floating "scroll down" button once the user has scrolled
+    // SCROLL_FAB_THRESHOLD pixels above the bottom anchor.
+    const SCROLL_FAB_THRESHOLD = 300;
+    const [showScrollDown, setShowScrollDown] = React.useState(false);
+
+    const handleScrollContainer = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+        handleScroll();
+        const el = e.currentTarget;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setShowScrollDown(distanceFromBottom > SCROLL_FAB_THRESHOLD);
+    }, [handleScroll]);
+
+    const handleScrollDownClick = useCallback(() => {
+        scrollToBottom();
+        setShowScrollDown(false);
+    }, [scrollToBottom]);
+
+    // ── Mention-aware scroll FAB badge ───────────────────────────────
+    // Each mention is tracked independently as a (message_id, offset) tuple in
+    // db.seenmentions. The "@" badge on the scroll-to-bottom button — and the
+    // sidebar @ badge — stays visible while at least one tuple targeting the
+    // current user is still unseen.
+
+    // For each message in the loaded view that targets the current user (or
+    // @all), the offsets of those mentions. Excludes messages authored by
+    // the current user — no point alerting yourself.
+    const mentionedByMessage = React.useMemo(() => {
+        if (!currentUser) return [] as { message_id: string; offsets: number[] }[];
+        const messages = chatType === "groupchat" ? processedGroupMessages : processedDirectMessages;
+        const out: { message_id: string; offsets: number[] }[] = [];
+        for (const m of messages) {
+            const senderId = typeof m.user === "object" && m.user !== null
+                ? (m.user as User).id
+                : (m.user as unknown as string);
+            if (senderId === currentUser.id) continue;
+            if (!Array.isArray(m.mentions) || m.mentions.length === 0) continue;
+            const offsets = m.mentions
+                .filter((mn: import("@/types/mentions").Mention) =>
+                    mn.mention_type === "all" || (mn.mention_type === "user" && mn.member?.user_id === currentUser.id)
+                )
+                .map((mn: import("@/types/mentions").Mention) => mn.offset);
+            if (offsets.length > 0) out.push({ message_id: m.id as string, offsets });
+        }
+        return out;
+    }, [processedDirectMessages, processedGroupMessages, chatType, currentUser]);
+
+    // Stable, dependency-friendly key for the mention tuples.
+    const mentionedTuplesKey = React.useMemo(
+        () => mentionedByMessage.map((m) => `${m.message_id}:${m.offsets.join(",")}`).join("|"),
+        [mentionedByMessage]
+    );
+
+    // Live-subscribed seen set, scoped to the current chat. Keys are
+    // `${message_id}::${offset}` for O(1) lookup.
+    const seenMentionKeys = useLiveQuery(async () => {
+        const rows = await db.seenmentions.where("chat_id").equals(chatId).toArray();
+        return new Set(rows.map((r) => `${r.message_id}::${r.offset}`));
+    }, [chatId]) ?? new Set<string>();
+
+    // Mark a mention bubble as "seen" only when the scroll has SETTLED with
+    // the bubble at >= 50% visibility inside the scroll container. Using a
+    // scroll-stop debounce instead of raw IntersectionObserver events avoids
+    // dismissing bubbles that briefly fly past during smooth scrolling and
+    // ensures the badge only clears once the user has actually arrived at
+    // the message.
+    React.useEffect(() => {
+        const root = scrollContainerRef.current;
+        if (!root || mentionedByMessage.length === 0) return;
+
+        const checkVisibleMentions = async () => {
+            const containerRect = root.getBoundingClientRect();
+            const toPersist: { message_id: string; offset: number; chat_id: string }[] = [];
+            for (const { message_id, offsets } of mentionedByMessage) {
+                const el = document.getElementById(`msg-${message_id}`);
+                if (!el) continue;
+                const rect = el.getBoundingClientRect();
+                const visibleTop = Math.max(rect.top, containerRect.top);
+                const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+                const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+                const ratio = rect.height > 0 ? visibleHeight / rect.height : 0;
+                if (ratio < 0.5) continue;
+                for (const offset of offsets) {
+                    if (!seenMentionKeys.has(`${message_id}::${offset}`)) {
+                        toPersist.push({ message_id, offset, chat_id: chatId });
+                    }
+                }
+            }
+            if (toPersist.length === 0) return;
+            await markMentionsSeen(toPersist);
+        };
+
+        let settleTimer: ReturnType<typeof setTimeout> | null = null;
+        const onScroll = () => {
+            if (settleTimer) clearTimeout(settleTimer);
+            settleTimer = setTimeout(checkVisibleMentions, 200);
+        };
+
+        // Initial check (covers the case where bubbles are already visible
+        // when the chat first opens — those count as "seen").
+        checkVisibleMentions();
+
+        root.addEventListener("scroll", onScroll, { passive: true });
+        return () => {
+            root.removeEventListener("scroll", onScroll);
+            if (settleTimer) clearTimeout(settleTimer);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mentionedTuplesKey, chatId, seenMentionKeys]);
+
+    const hasUnseenMention = React.useMemo(
+        () => mentionedByMessage.some(({ message_id, offsets }) =>
+            offsets.some((o) => !seenMentionKeys.has(`${message_id}::${o}`))
+        ),
+        [mentionedByMessage, seenMentionKeys]
+    );
+
     const handleScrollToMessage = useCallback((msgId: string) => {
         const element = scrollToMessageId(msgId);
         if (element) {
@@ -721,9 +868,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             // but we added the ID to the bubble div itself.
             element.classList.remove('animate-reply-highlight');
             // Trigger reflow to restart animation
-            void element.offsetWidth; 
+            void element.offsetWidth;
             element.classList.add('animate-reply-highlight');
-            
+
             // Optional: remove class after animation ends
             setTimeout(() => {
                 element.classList.remove('animate-reply-highlight');
@@ -771,6 +918,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         if (msg.type === "groupchat" && (msg.action === "send" || msg.action === "reply") && msg.data) {
             const incomingMsg = (msg.data as WSData).groupchat_messages;
             const recipients = (msg.data as WSData).groupchat_message_recipients;
+            const recipient_unread_messages = (msg.data as WSData).recipient_unread_messages
             setLocalOptimisticMessages(prev => prev.filter(m => m.content !== incomingMsg.content));
             db.groupmessagechats
                 .where('groupchat_id').equals(chatId)
@@ -791,7 +939,12 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     delivered_date: new Date(r.delivered_date),
                     read_date: r.read_date ? new Date(r.read_date) : null
                 })));
+            } else {
+                db.user.update((recipient_unread_messages?.user_id as any), {
+                    unread_messages: recipient_unread_messages?.unread_messages
+                })
             }
+
             return;
         }
 
@@ -921,10 +1074,41 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Clear local optimistic messages when switching chats
     React.useEffect(() => {
         setLocalOptimisticMessages([]);
+        setMentionQuery(null);
     }, [chatId]);
 
-    // Ref for the message input element
-    const inputRef = useRef<HTMLTextAreaElement>(null);
+    // Ref for the message input element (contenteditable)
+    const inputRef = useRef<HTMLDivElement>(null);
+    const isComposingRef = useRef(false);
+
+    // Tracks active mentions in the composer (rebuilt on each insertion).
+    const composerMentionsRef = useRef<ComposerMention[]>([]);
+
+    // Validate tracked mentions against the current text. Drops any whose
+    // rendered `@${name}` span is gone, and re-anchors offsets to where the
+    // span actually sits now. Returns the surviving ComposerMention[]; callers
+    // convert to wire format with toMentionInput when needed.
+    const reconcileComposerMentions = useCallback((text: string): ComposerMention[] => {
+        const used: Array<[number, number]> = [];
+        const remaining: ComposerMention[] = [];
+        for (const m of composerMentionsRef.current) {
+            const needle = `@${m.name}`;
+            let from = 0;
+            let idx = -1;
+            while (true) {
+                const found = text.indexOf(needle, from);
+                if (found === -1) { idx = -1; break; }
+                const overlaps = used.some(([s, e]) => found < e && (found + needle.length) > s);
+                if (!overlaps) { idx = found; break; }
+                from = found + 1;
+            }
+            if (idx === -1) continue;
+            used.push([idx, idx + needle.length]);
+            remaining.push({ ...m, offset: idx, length: needle.length });
+        }
+        composerMentionsRef.current = remaining;
+        return remaining;
+    }, []);
 
     // Debounce ref: clears and resets a timer on every keystroke
     const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -945,14 +1129,26 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     }, [currentUser, chatType, chatId, globalSendMessage]);
 
     const handleSendMessage = useCallback(async () => {
-        const text = inputRef.current?.value.trim();
+        const text = getEditorText(inputRef.current).trim();
         if (!text || !currentUser) return;
+
+        const composerMentions = reconcileComposerMentions(text);
+        // Wire payload uses just the GroupMember id; backend resolves the user.
+        const mentions: MentionInput[] = composerMentions.map(toMentionInput);
 
         // Create optimi message
         const timestamp = new Date();
         const tempId = `temp-${Date.now()}`;
         const clientMsgId = `cmsg-${Date.now()}`;
         let optimisticMsg: DirectMessageChats | GroupMessageChats;
+
+        const optimisticMentions = composerMentions.map((m) => ({
+            mention_type: m.mention_type,
+            member: m.member ? { id: m.member.id, user_id: m.member.user_id } : null,
+            name: m.name,
+            offset: m.offset,
+            length: m.length,
+        }));
 
         if (chatType === "directmessage") {
             optimisticMsg = {
@@ -969,7 +1165,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 forwarded: false,
                 edited: false,
                 deleted: undefined,
-                client_msg_id: clientMsgId
+                client_msg_id: clientMsgId,
+                mentions: optimisticMentions,
             } as DirectMessageChats;
             // Add to local state IMMEDIATELY for zero latency
             setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
@@ -992,7 +1189,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 timestamp: timestamp,
                 receipt: "sent",
                 isOptimistic: true,
-                client_msg_id: clientMsgId
+                client_msg_id: clientMsgId,
+                mentions: optimisticMentions,
             } as GroupMessageChats;
             // Add to local state IMMEDIATELY for zero latency
             setLocalOptimisticMessages(prev => [...prev, optimisticMsg]);
@@ -1008,7 +1206,8 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                     message: {
                         message_id: replyMessage.id,
                         content: text,
-                        client_msg_id: clientMsgId
+                        client_msg_id: clientMsgId,
+                        mentions,
                     },
                 },
             });
@@ -1018,7 +1217,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 type: chatType,
                 data: {
                     action: "send",
-                    message: { text, client_msg_id: clientMsgId },
+                    message: { text, client_msg_id: clientMsgId, mentions },
                 },
             });
         }
@@ -1026,19 +1225,20 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
 
         // Clear input, draft, and stop typing indicator
         if (inputRef.current) {
-            inputRef.current.value = "";
-            inputRef.current.style.height = "auto";
+            inputRef.current.innerHTML = "";
         }
         currentInputValueRef.current = "";
         if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
         setHasText(false);
+        setMentionQuery(null);
+        composerMentionsRef.current = [];
         stopTyping();
 
         // Clear draft memory so it doesn't get saved back on unmount
         if (chatItemIdRef.current) {
             db.chatlist.update(chatItemIdRef.current, { draft: null });
         }
-    }, [currentUser, chatType, chatId, sendChatMessage, stopTyping, replyMessage]);
+    }, [currentUser, chatType, chatId, sendChatMessage, stopTyping, replyMessage, reconcileComposerMentions]);
 
     const handleRetryMessage = useCallback(async (msg: DirectMessageChats | GroupMessageChats) => {
         // 1. Ensure client_msg_id exists
@@ -1080,11 +1280,83 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         // Media retry is handled by its own component but we could also add a general case here
     }, [chatType, sendChatMessage, readyState]);
 
-    const handleTyping = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Enter sends, Shift+Enter inserts a new line
-        if (e.key === "Enter" && !e.shiftKey) {
+    const handleTyping = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        // Close mention picker on Escape
+        if (e.key === "Escape" && mentionQuery) {
             e.preventDefault();
-            handleSendMessage();
+            setMentionQuery(null);
+            return;
+        }
+
+        // Atomic mention deletion: any Backspace/Delete that touches a tracked
+        // '@name' span removes the entire mention (including the '@'). Prevents
+        // the user from chipping characters off the front, middle, or end.
+        if ((e.key === "Backspace" || e.key === "Delete") && composerMentionsRef.current.length > 0) {
+            const el = inputRef.current;
+            const range = el ? getSelectionOffsetRange(el) : null;
+            if (el && range) {
+                const text = getEditorText(el);
+                let delStart: number;
+                let delEnd: number;
+                if (range.start !== range.end) {
+                    delStart = range.start;
+                    delEnd = range.end;
+                } else if (e.key === "Backspace") {
+                    delStart = Math.max(0, range.start - 1);
+                    delEnd = range.start;
+                } else {
+                    delStart = range.start;
+                    delEnd = Math.min(text.length, range.start + 1);
+                }
+                let touched = false;
+                let actualStart = delStart;
+                let actualEnd = delEnd;
+                for (const m of composerMentionsRef.current) {
+                    const mStart = m.offset;
+                    const mEnd = m.offset + m.length;
+                    if (delStart < mEnd && delEnd > mStart) {
+                        touched = true;
+                        actualStart = Math.min(actualStart, mStart);
+                        actualEnd = Math.max(actualEnd, mEnd);
+                    }
+                }
+                if (touched) {
+                    e.preventDefault();
+                    const newText = text.slice(0, actualStart) + text.slice(actualEnd);
+                    const removedLen = actualEnd - actualStart;
+                    composerMentionsRef.current = composerMentionsRef.current
+                        .filter((m) => !(m.offset < actualEnd && m.offset + m.length > actualStart))
+                        .map((m) =>
+                            m.offset >= actualEnd ? { ...m, offset: m.offset - removedLen } : m
+                        );
+                    renderEditorContent(el, newText, composerMentionsRef.current);
+                    setCursorOffset(el, actualStart);
+                    el.dispatchEvent(new Event("input", { bubbles: true }));
+                    return;
+                }
+            }
+        }
+
+        // Enter sends, Shift+Enter inserts a real \n (instead of contenteditable's <div>/<br>)
+        if (e.key === "Enter") {
+            if (!e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+                return;
+            }
+            e.preventDefault();
+            const sel = window.getSelection();
+            if (sel?.rangeCount) {
+                const range = sel.getRangeAt(0);
+                range.deleteContents();
+                const node = document.createTextNode("\n");
+                range.insertNode(node);
+                range.setStartAfter(node);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                inputRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+            }
             return;
         }
 
@@ -1116,7 +1388,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 isTyping: false,
             });
         }, 1500);
-    }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage]);
+    }, [currentUser, chatType, chatId, globalSendMessage, handleSendMessage, mentionQuery]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);
@@ -1145,7 +1417,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         e.target.value = "";
     };
 
-    const handleSendFiles = useCallback((files: File[], captions: Record<number, string>, isDocument?: boolean) => {
+    const handleSendFiles = useCallback((files: File[], captions: Record<number, string>, isDocument?: boolean, mentions: MentionInput[] = []) => {
         if (!currentUser) return;
 
         // Clear UI immediately for instant feedback
@@ -1160,14 +1432,18 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         uploadMediaFiles(files, {
             chat_type: chatType === "directmessage" ? "directmessage" : "group_chat",
             context_id: chatId,
-            forceDocument: isDocument
+            forceDocument: isDocument,
+            reply_to: replyMessage?.id,
+            highlightedFile: (replyMessage as any)?.highlightedFile,
+            mentions: mentions.length > 0 ? mentions : undefined,
         }, captions).then(() => {
             scrollToBottom();
+            setReplyMessage(null);
         }).catch((error) => {
             console.error("Failed to upload files:", error);
             toast.error("Failed to upload some files.");
         });
-    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom]);
+    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom, replyMessage]);
 
     const startRecording = useCallback(() => {
         setIsRecording(true);
@@ -1222,8 +1498,10 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
             context_id: chatId,
             mediaTypeOverride: 'voice_recording',
             duration: formatDuration(duration),
+            reply_to: replyMessage?.id
         }, {}).then(() => {
             scrollToBottom();
+            setReplyMessage(null);
             // Clear voice draft from DB after successful upload
             if (chatItemIdRef.current) {
                 db.chatlist.update(chatItemIdRef.current, { draft: null });
@@ -1235,7 +1513,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 db.chatlist.update(chatItemIdRef.current, { draft: null });
             }
         });
-    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom, globalSendMessage]);
+    }, [currentUser, chatType, chatId, uploadMediaFiles, scrollToBottom, globalSendMessage, replyMessage]);
 
     const handleVoiceDraft = useCallback((blob: Blob, duration: number, mimeType: string) => {
         // Update local state to keep in sync with draft
@@ -1356,7 +1634,9 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         const savedDraft = chatItem.draft?.text ?? "";
 
         if (inputRef.current) {
-            inputRef.current.value = savedDraft;
+            // Drafts don't carry mention metadata yet — render as plain text.
+            renderEditorContent(inputRef.current, savedDraft, []);
+            setCursorOffset(inputRef.current, savedDraft.length);
             setHasText(savedDraft.length > 0);
             currentInputValueRef.current = savedDraft;
         }
@@ -1365,19 +1645,136 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
     // Keep mirror refs in sync with the latest chatItem metadata.
     chatItemIdRef.current = chatItem?.id;
 
+    // ─── Mention picker: detect active @-query at the caret ───────────────
+    const detectMentionQuery = useCallback(() => {
+        const el = inputRef.current;
+        if (!el) {
+            setMentionQuery(null);
+            return;
+        }
+        const value = getEditorText(el);
+        const caret = getCursorOffset(el);
+
+        // Walk back from caret looking for '@'. Abort on whitespace.
+        let i = caret - 1;
+        while (i >= 0) {
+            const ch = value[i];
+            if (ch === "@") {
+                const isAtBoundary = i === 0 || /\s/.test(value[i - 1]);
+                if (isAtBoundary) {
+                    setMentionQuery({ query: value.slice(i + 1, caret), startIndex: i });
+                    // Compute the @ symbol's X position relative to the picker's anchor.
+                    const anchor = mentionAnchorRef.current;
+                    if (anchor) {
+                        const charRect = getOffsetRect(el, i);
+                        const anchorRect = anchor.getBoundingClientRect();
+                        const raw = charRect ? charRect.left - anchorRect.left : 0;
+                        const pickerWidth = 300;
+                        const maxLeft = Math.max(0, anchorRect.width - pickerWidth);
+                        setMentionLeftOffset(Math.max(0, Math.min(raw, maxLeft)));
+                    }
+                } else {
+                    setMentionQuery(null);
+                }
+                return;
+            }
+            if (/\s/.test(ch)) {
+                setMentionQuery(null);
+                return;
+            }
+            i--;
+        }
+        setMentionQuery(null);
+    }, []);
+
+    const handleMentionSelect = useCallback((selection: MentionPickerSelection) => {
+        const el = inputRef.current;
+        if (!el || !mentionQuery) return;
+
+        const value = getEditorText(el);
+        const caret = getCursorOffset(el);
+        const before = value.slice(0, mentionQuery.startIndex);
+        const after = value.slice(caret);
+
+        let composerMention: ComposerMention;
+        let renderedName: string;
+
+        if (selection.type === "all") {
+            renderedName = "all";
+            composerMention = {
+                mention_type: "all",
+                member: null,
+                name: renderedName,
+                offset: before.length,
+                length: ("@" + renderedName).length,
+            };
+        } else {
+            const member = selection.member;
+            if (!member.user) return;
+            // If member.name is just a phone (e.g. "+2348012345678"), prefer display_name
+            const phoneAsName = !!member.name && /^\+\d+$/.test(member.name.replaceAll(" ", ""));
+            renderedName = phoneAsName ? (member.user.display_name || member.name) : member.name;
+            composerMention = {
+                mention_type: "user",
+                member: { id: member.id, user_id: member.user.id },
+                name: renderedName,
+                offset: before.length,
+                length: ("@" + renderedName).length,
+            };
+        }
+
+        const insertText = `@${renderedName} `;
+        const newValue = before + insertText + after;
+        const insertedOffset = composerMention.offset;
+
+        // Shift any pre-existing tracked mentions sitting at/after the insertion point
+        composerMentionsRef.current = composerMentionsRef.current.map((m) =>
+            m.offset >= insertedOffset
+                ? { ...m, offset: m.offset + insertText.length }
+                : m
+        );
+        composerMentionsRef.current.push(composerMention);
+
+        renderEditorContent(el, newValue, composerMentionsRef.current);
+        const newCaret = before.length + insertText.length;
+        setCursorOffset(el, newCaret);
+
+        currentInputValueRef.current = newValue;
+        setHasText(newValue.length > 0);
+        setMentionQuery(null);
+
+        el.focus();
+    }, [mentionQuery]);
+
+    const mentionableMembers = React.useMemo(
+        () => groupMembers.filter((m) => m.user?.id !== currentUser?.id),
+        [groupMembers, currentUser?.id]
+    );
+
     // ─── Draft: input change handler (debounced save to DB) ───────────────────
-    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const text = e.target.value;
+    const handleInputChange = useCallback(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        if (isComposingRef.current) return; // skip while IME composing
+
+        const text = getEditorText(el);
+        const cursor = getCursorOffset(el);
+
+        // Re-anchor tracked mentions to wherever they sit in the new text;
+        // drops any whose '@<name>' span has been edited away.
+        reconcileComposerMentions(text);
+
+        // Re-render with only tracked mentions styled — active typing stays plain.
+        renderEditorContent(el, text, composerMentionsRef.current);
+        setCursorOffset(el, cursor);
+
         currentInputValueRef.current = text;
         setHasText(text.length > 0);
 
-        // Auto-resize textarea
-        const textarea = e.target;
-        textarea.style.height = "auto";
-        textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
-
         // Mark as sourced/dirty so the flush logic knows we have a value worth saving.
         draftRestoredForRef.current = chatId;
+
+        detectMentionQuery();
 
         if (!chatItem) return;
         if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
@@ -1386,7 +1783,23 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                 draft: text ? { text, timestamp: new Date() } : null,
             });
         }, 500); // 500ms debounce
-    }, [chatItem, chatId]);
+    }, [chatItem, chatId, detectMentionQuery, reconcileComposerMentions]);
+
+    const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const text = e.clipboardData.getData("text/plain");
+        const sel = window.getSelection();
+        if (!sel?.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        inputRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+    }, []);
 
     // ─── Draft: flush when leaving a chat (chatId change OR full unmount OR refresh) ────
     // Use a ref so the cleanup closure always reads the latest value.
@@ -1433,7 +1846,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         const groupMembersRes = await axiosInstance.get<GroupMemberResults>(`/groups/${chatId}/members`)
 
                         if (groupMembersRes.data && groupMembersRes.data.results.length > 0) {
-                            await db.groupmembers.clear();
                             await db.groupmembers.bulkPut(groupMembersRes.data.results);
                             setGroupMembers(groupMembersRes.data.results);
                             setGroupInfo(groupMembersRes.data.results[0].groupchat)
@@ -1516,7 +1928,7 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                         {/* ── Messages Area ───────────────────────────────────── */}
                         <div
                             ref={scrollContainerRef}
-                            onScroll={handleScroll}
+                            onScroll={handleScrollContainer}
                             className="flex-1 overflow-y-auto py-4"
                         >
                             {/* direct message chats */}
@@ -1604,6 +2016,28 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             <div ref={bottomAnchorRef} className="h-2" />
                         </div>
 
+                        {/* ── Scroll-to-bottom button ────────────────────────── */}
+                        {/* Stay visible while there are still unseen mention bubbles
+                            so the user can confirm the "@" cue dismisses on intersect. */}
+                        {(showScrollDown || hasUnseenMention) && (
+                            <button
+                                type="button"
+                                onClick={handleScrollDownClick}
+                                aria-label="Scroll to latest"
+                                className="absolute right-6 bottom-24 z-10 w-10 h-10 rounded-full bg-white shadow-md border border-[#e9edef] flex items-center justify-center hover:bg-[#f5f6f6] transition-all cursor-pointer"
+                            >
+                                <ChevronDown size={22} className="text-[#54656f]" />
+                                {hasUnseenMention && (
+                                    <span
+                                        aria-label="You were mentioned"
+                                        className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full bg-accent-primary text-white text-[10px] font-bold flex items-center justify-center shadow-sm leading-none"
+                                    >
+                                        @
+                                    </span>
+                                )}
+                            </button>
+                        )}
+
                         {/* ── Typing/Recording Indicator (bottom of chat, above footer) ── */}
                         {(typingUsers.length > 0 || recordingUsers.length > 0) && (
                             <div className="flex items-end gap-4 px-4 pb-3">
@@ -1676,200 +2110,267 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             </footer>
                         ) : (
                             <footer className="flex items-end px-2 py-2 bg-transparent border-none w-full max-w-full">
-                                <div className="flex flex-col flex-1 bg-white rounded-[24px] px-1.5 pb-1 gap-0 shadow-sm overflow-hidden min-h-[46px]">
-                                    {replyMessage && (
-                                        <div className="flex animate-in fade-in slide-in-from-bottom-2 duration-200 pt-1.5 px-1.5 w-full">
-                                            <div className="flex flex-1 items-start bg-background-secondary rounded-lg pl-3 pr-2 py-2 relative overflow-hidden border-l-4" style={{ borderColor: replyMessage.user?.color_code ? `color-mix(in srgb, ${replyMessage.user.color_code} 75%, black)` : '#043b9e' }}>
-                                                <div className="flex flex-col flex-1 min-w-0 pr-6">
-                                                    <div className="text-[13px] font-medium truncate capitalize mb-0.5">
-                                                        {chatType === 'directmessage' ? (
-                                                            <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>
-                                                                {replyMessage.user.id === currentUser?.id ? "You" : ((directMessage?.name as DirectMessageName)?.contact_name || (directMessage?.name as DirectMessageName)?.display_name || "User")}
-                                                            </span>
-                                                        ) : (
-                                                            replyMessage.user.id === currentUser?.id ? (
-                                                                <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>You</span>
+                                <div ref={mentionAnchorRef} className="relative flex flex-1 min-w-0">
+                                    {mentionQuery && (
+                                        <MentionPicker
+                                            members={chatType === "groupchat" ? mentionableMembers : []}
+                                            query={mentionQuery.query}
+                                            onSelect={handleMentionSelect}
+                                            leftOffset={mentionLeftOffset}
+                                            showAll={chatType === "groupchat"}
+                                        />
+                                    )}
+                                    <div className="flex flex-col flex-1 bg-white rounded-[24px] px-1.5 pb-1 gap-0 shadow-sm overflow-hidden min-h-[46px]">
+                                        {replyMessage && (
+                                            <div className="flex animate-in fade-in slide-in-from-bottom-2 duration-200 pt-1.5 px-1.5 w-full">
+                                                <div className="flex flex-1 items-start bg-background-secondary rounded-lg pl-3 pr-2 py-2 relative overflow-hidden border-l-4" style={{ borderColor: replyMessage.user?.color_code ? `color-mix(in srgb, ${replyMessage.user.color_code} 75%, black)` : '#043b9e' }}>
+                                                    <div className="flex flex-col flex-1 min-w-0 pr-6">
+                                                        <div className="text-[13px] font-medium truncate capitalize mb-0.5">
+                                                            {chatType === 'directmessage' ? (
+                                                                <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>
+                                                                    {replyMessage.user.id === currentUser?.id ? "You" : ((directMessage?.name as DirectMessageName)?.contact_name || (directMessage?.name as DirectMessageName)?.display_name || "User")}
+                                                                </span>
                                                             ) : (
-                                                                <>
-                                                                    <span style={{ color: (replyMessage as GroupMessageChats).user?.color_code || '#0852dd' }}>
-                                                                        {(replyMessage as GroupMessageChats).user?.contact_id
-                                                                            ? (replyMessage as GroupMessageChats).user?.contact_name
-                                                                            : (replyMessage as GroupMessageChats).user?.display_name
+                                                                replyMessage.user.id === currentUser?.id ? (
+                                                                    <span style={{ color: replyMessage.user?.color_code || '#0852dd' }}>You</span>
+                                                                ) : (
+                                                                    <>
+                                                                        <span style={{ color: (replyMessage as GroupMessageChats).user?.color_code || '#0852dd' }}>
+                                                                            {(replyMessage as GroupMessageChats).user?.contact_id
+                                                                                ? (replyMessage as GroupMessageChats).user?.contact_name
+                                                                                : (replyMessage as GroupMessageChats).user?.display_name
+                                                                            }
+                                                                        </span>
+                                                                        {!(replyMessage as GroupMessageChats).user?.contact_id && (
+                                                                            <span className="text-muted-foreground ml-1">
+                                                                                {(replyMessage as GroupMessageChats).user?.phone}
+                                                                            </span>
+                                                                        )}
+                                                                    </>
+                                                                )
+                                                            )}
+                                                        </div>
+                                                        <span className="text-[13.5px] text-[#667781] truncate">
+                                                            {replyMessage.content ? renderContentWithMentions(replyMessage.content, replyMessage.mentions) : (
+                                                                replyMessage.files && replyMessage.files.length > 0 ? (
+                                                                    <span className="flex items-center gap-1 text-[#667781]">
+                                                                        <ImageIcon size={14} />
+                                                                        {replyMessage.highlightedFile
+                                                                            ? (replyMessage.highlightedFile.caption || "photo")
+                                                                            : (replyMessage.files.find(f => f.caption)?.caption || (replyMessage.files.length > 1 ? `${replyMessage.files.length} photos` : "photo"))
                                                                         }
                                                                     </span>
-                                                                    {!(replyMessage as GroupMessageChats).user?.contact_id && (
-                                                                        <span className="text-muted-foreground ml-1">
-                                                                            {(replyMessage as GroupMessageChats).user?.phone}
-                                                                        </span>
-                                                                    )}
-                                                                </>
-                                                            )
-                                                        )}
+                                                                ) : replyMessage.voice_message ? (
+                                                                    <span className="flex items-center gap-1 text-[#667781]">
+                                                                        <Mic size={14} className="text-[#00a884]" />
+                                                                        Voice message
+                                                                    </span>
+                                                                ) : "Message"
+                                                            )}
+                                                        </span>
                                                     </div>
-                                                    <span className="text-[13.5px] text-[#667781] truncate">
-                                                        {replyMessage.content || (replyMessage.files?.length ? "Photo" : (replyMessage.voice_message ? "Voice message" : "Message"))}
-                                                    </span>
-                                                </div>
 
-                                                <button
-                                                    onClick={() => setReplyMessage(null)}
-                                                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors absolute right-2 top-1/2 -translate-y-1/2"
-                                                >
-                                                    <X size={20} className="text-dark font-bold" />
-                                                </button>
+                                                    {/* Thumbnail preview on the right - only for individual files */}
+                                                    {replyMessage.highlightedFile && (
+                                                        <div className="w-[54px] h-[54px] rounded-md overflow-hidden shrink-0 ml-1.5 mr-8 relative group select-none">
+                                                            {replyMessage.highlightedFile.type === 'image' || replyMessage.highlightedFile.type === 'video' ? (
+                                                                <Image
+                                                                    src={replyMessage.highlightedFile.media_url || replyMessage.highlightedFile.thumbnail_url || replyMessage.highlightedFile.preview_url || ''}
+                                                                    alt=""
+                                                                    width={54}
+                                                                    height={54}
+                                                                    className="w-full h-full object-cover"
+                                                                    unoptimized={true}
+                                                                />
+                                                            ) : (
+                                                                <div className="w-full h-full bg-[#f0f2f5] flex items-center justify-center">
+                                                                    <FileText size={20} className="text-[#667781]" />
+                                                                </div>
+                                                            )}
+                                                            {replyMessage.highlightedFile.type === 'video' && (
+                                                                <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                                                                    <Play size={12} className="text-white fill-white" />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    <button
+                                                        onClick={() => setReplyMessage(null)}
+                                                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors absolute right-2 top-1/2 -translate-y-1/2"
+                                                    >
+                                                        <X size={20} className="text-dark font-bold" />
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
-
-                                    <div className="flex items-end flex-1 bg-white pt-1 gap-1 min-h-[46px]">
-                                        {isRecording ? (
-                                            <VoiceRecorder
-                                                onStop={handleVoiceRecordingStop}
-                                                onCancel={handleVoiceRecordingCancel}
-                                                onDraft={handleVoiceDraft}
-                                                onPause={handleVoiceRecordingPause}
-                                                onResume={handleVoiceRecordingResume}
-                                                draftBlob={voiceDraftBlob}
-                                                draftDuration={voiceDraftDuration}
-                                                draftMimeType={voiceDraftMimeType}
-                                            />
-                                        ) : (
-                                            <>
-                                                {/* Plus (attach) */}
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer outline-none">
-                                                            <AttachmentPlusIcon
-                                                                style={{ width: "24px", height: "24px" }}
-                                                                className="text-[#54656f]"
-                                                            />
-                                                        </button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent
-                                                        side="top"
-                                                        align="start"
-                                                        className="mb-4 w-48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
-                                                    >
-                                                        <DropdownMenuItem
-                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                            onClick={() => fileInputRef.current?.click()}
-                                                        >
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <FileText size={20} className="text-[#7f66ff]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Document</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem
-                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                            onClick={() => mediaInputRef.current?.click()}
-                                                        >
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <ImageIcon size={20} className="text-[#007bfc]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Photos & videos</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <Camera size={20} className="text-[#ff2e74]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Camera</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem
-                                                            onClick={() => audioInputRef.current?.click()}
-                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                        >
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <Headphones size={20} className="text-[#ff7f35]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Audio</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem
-                                                            onClick={() => setIsContactModalOpen(true)}
-                                                            className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
-                                                        >
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <UserIcon size={20} className="text-[#0695cc]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Contact</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <BarChart2 size={20} className="text-[#ffbc38]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Poll</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <Calendar size={20} className="text-[#ff2e74]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">Event</span>
-                                                        </DropdownMenuItem>
-
-                                                        <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
-                                                            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
-                                                                <StickyNote size={20} className="text-[#00a884]" />
-                                                            </div>
-                                                            <span className="text-[14.5px] font-normal">New sticker</span>
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-
-                                                {/* Emoji */}
-                                                <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer">
-                                                    <EmojiIcon
-                                                        style={{ width: "24px", height: "24px" }}
-                                                        className="text-[#54656f]"
-                                                    />
-                                                </button>
-
-                                                {/* Text Input */}
-                                                <div className="flex-1 px-1">
-                                                    <textarea
-                                                        ref={inputRef}
-                                                        rows={1}
-                                                        placeholder="Type a message"
-                                                        className="w-full border-none bg-transparent py-[9px] text-[15.5px] text-[#111b21] placeholder-[#8696a0] outline-none resize-none"
-                                                        style={{ maxHeight: 120, overflow: "hidden" }}
-                                                        onChange={handleInputChange}
-                                                        onKeyDown={handleTyping}
-                                                    />
-                                                </div>
-
-                                                {/* Mic / Send */}
-                                                <button
-                                                    onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
-                                                    onClick={hasText ? handleSendMessage : startRecording}
-                                                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer group ${hasText ? "hover:bg-[#f0f2f5]" : "hover:bg-[#00a884]"
-                                                        }`}
-                                                >
-                                                    <span
-                                                        className="transition-all duration-150"
-                                                        style={{
-                                                            display: "inline-flex",
-                                                            transform: hasText ? "scale(1.05) rotate(0deg)" : "scale(1) rotate(0deg)",
-                                                        }}
-                                                    >
-                                                        {hasText ? (
-                                                            <SendIcon
-                                                                style={{ width: "24px", height: "24px" }}
-                                                                className="text-[#54656f]"
-                                                            />
-                                                        ) : (
-                                                            <MicrophoneIcon
-                                                                style={{ width: "24px", height: "24px" }}
-                                                                className="text-[#54656f] group-hover:text-white"
-                                                            />
-                                                        )}
-                                                    </span>
-                                                </button>
-                                            </>
                                         )}
+
+                                        <div className="flex items-end flex-1 bg-white pt-1 gap-1 min-h-[46px]">
+                                            {isRecording ? (
+                                                <VoiceRecorder
+                                                    onStop={handleVoiceRecordingStop}
+                                                    onCancel={handleVoiceRecordingCancel}
+                                                    onDraft={handleVoiceDraft}
+                                                    onPause={handleVoiceRecordingPause}
+                                                    onResume={handleVoiceRecordingResume}
+                                                    draftBlob={voiceDraftBlob}
+                                                    draftDuration={voiceDraftDuration}
+                                                    draftMimeType={voiceDraftMimeType}
+                                                />
+                                            ) : (
+                                                <>
+                                                    {/* Plus (attach) */}
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer outline-none">
+                                                                <AttachmentPlusIcon
+                                                                    style={{ width: "24px", height: "24px" }}
+                                                                    className="text-[#54656f]"
+                                                                />
+                                                            </button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent
+                                                            side="top"
+                                                            align="start"
+                                                            className="mb-4 w-48 border-none rounded-2xl p-1 shadow-xl overflow-hidden"
+                                                        >
+                                                            <DropdownMenuItem
+                                                                className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                                onClick={() => fileInputRef.current?.click()}
+                                                            >
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <FileText size={20} className="text-[#7f66ff]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Document</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem
+                                                                className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                                onClick={() => mediaInputRef.current?.click()}
+                                                            >
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <ImageIcon size={20} className="text-[#007bfc]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Photos & videos</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <Camera size={20} className="text-[#ff2e74]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Camera</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem
+                                                                onClick={() => audioInputRef.current?.click()}
+                                                                className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                            >
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <Headphones size={20} className="text-[#ff7f35]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Audio</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem
+                                                                onClick={() => setIsContactModalOpen(true)}
+                                                                className="flex items-center gap-3 px-3 cursor-pointer rounded-none"
+                                                            >
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <UserIcon size={20} className="text-[#0695cc]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Contact</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <BarChart2 size={20} className="text-[#ffbc38]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Poll</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <Calendar size={20} className="text-[#ff2e74]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">Event</span>
+                                                            </DropdownMenuItem>
+
+                                                            <DropdownMenuItem className="flex items-center gap-3 px-3 cursor-pointer rounded-none">
+                                                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+                                                                    <StickyNote size={20} className="text-[#00a884]" />
+                                                                </div>
+                                                                <span className="text-[14.5px] font-normal">New sticker</span>
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+
+                                                    {/* Emoji */}
+                                                    <button className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#f0f2f5] transition-colors shrink-0 cursor-pointer">
+                                                        <EmojiIcon
+                                                            style={{ width: "24px", height: "24px" }}
+                                                            className="text-[#54656f]"
+                                                        />
+                                                    </button>
+
+                                                    {/* Text Input (contenteditable so mention spans render inline) */}
+                                                    <div className="flex-1 px-1 relative self-center">
+                                                        {!hasText && (
+                                                            <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[15.5px] text-[#8696a0] pointer-events-none select-none">
+                                                                Type a message
+                                                            </span>
+                                                        )}
+                                                        <div
+                                                            ref={inputRef}
+                                                            contentEditable
+                                                            suppressContentEditableWarning
+                                                            role="textbox"
+                                                            aria-multiline="true"
+                                                            className="w-full whitespace-pre-wrap wrap-break-words border-none bg-transparent py-[4px] text-[15.5px] text-[#111b21] outline-none leading-normal overflow-y-auto"
+                                                            style={{ maxHeight: 120 }}
+                                                            onInput={handleInputChange}
+                                                            onKeyDown={handleTyping}
+                                                            onKeyUp={detectMentionQuery}
+                                                            onMouseUp={detectMentionQuery}
+                                                            onPaste={handlePaste}
+                                                            onCompositionStart={() => { isComposingRef.current = true; }}
+                                                            onCompositionEnd={() => {
+                                                                isComposingRef.current = false;
+                                                                handleInputChange();
+                                                            }}
+                                                            onBlur={() => setMentionQuery(null)}
+                                                        />
+                                                    </div>
+
+                                                    {/* Mic / Send */}
+                                                    <button
+                                                        onMouseDown={(e) => { if (hasText) e.preventDefault(); }}
+                                                        onClick={hasText ? handleSendMessage : startRecording}
+                                                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer group ${hasText ? "hover:bg-[#f0f2f5]" : "hover:bg-[#00a884]"
+                                                            }`}
+                                                    >
+                                                        <span
+                                                            className="transition-all duration-150"
+                                                            style={{
+                                                                display: "inline-flex",
+                                                                transform: hasText ? "scale(1.05) rotate(0deg)" : "scale(1) rotate(0deg)",
+                                                            }}
+                                                        >
+                                                            {hasText ? (
+                                                                <SendIcon
+                                                                    style={{ width: "24px", height: "24px" }}
+                                                                    className="text-[#54656f]"
+                                                                />
+                                                            ) : (
+                                                                <MicrophoneIcon
+                                                                    style={{ width: "24px", height: "24px" }}
+                                                                    className="text-[#54656f] group-hover:text-white"
+                                                                />
+                                                            )}
+                                                        </span>
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </footer>

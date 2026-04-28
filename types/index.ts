@@ -49,6 +49,7 @@ export type DirectMessage = {
   recent_content_id: string;
   recent_files?: MediaFile[];
   recent_message_type?: string;
+  recent_mentions?: import("./mentions").Mention[];
   unread_messages: number;
   last_seen: Date | null;
   is_online?: boolean;
@@ -73,6 +74,7 @@ export type GroupChat = {
   recent_content_id: string;
   recent_files?: MediaFile[];
   recent_message_type?: string;
+  recent_mentions?: import("./mentions").Mention[];
   unread_messages: number;
   online_users?: number;
   recent_voice_message?: string;
@@ -163,6 +165,8 @@ export type DirectMessageChats = {
   voice_message_file_id?: string;
   uploadStatus?: MediaStatus;
   attachments?: Attachment[];
+  highlightedFile?: MediaFile;
+  mentions?: import("./mentions").Mention[];
   deleted?: {
     message_id: string,
     delete_type: "for_me" | "for_everyone",
@@ -185,6 +189,10 @@ export type WSData = {
   group_id: string,
   groupchat_messages: GroupMessageChats,
   groupchat_message_recipients: GroupMessageChatRecipients[]
+  recipient_unread_messages?: {
+    user_id: string,
+    unread_messages: number
+  }
   online_users: number
 }
 export type GroupMessageChats = {
@@ -212,6 +220,8 @@ export type GroupMessageChats = {
   voice_message_file_id?: string;
   uploadStatus?: import("./mediaTypes").MediaStatus;
   attachments?: Attachment[];
+  highlightedFile?: import("./mediaTypes").MediaFile;
+  mentions?: import("./mentions").Mention[];
   deleted?: {
     message_id: string,
     delete_type: "for_me" | "for_everyone",
@@ -282,5 +292,4 @@ export type UserSettings = {
   push_notification: boolean;
   theme: "auto" | "light" | "dark";
 }
-
 

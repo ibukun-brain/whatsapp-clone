@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Play, Pause, Headphones, Send, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmojiIcon } from "@/components/icons/chats-icon";
+import Image from "next/image";
 
 interface AudioUploadPreviewProps {
     files: File[];
@@ -150,6 +151,7 @@ const AudioUploadPreview = ({
 
             {/* Footer */}
             <div className="bg-white px-6 py-3 flex flex-col gap-3">
+                
                 <div className="max-w-3xl mx-auto w-full flex items-center gap-3">
                     <div className="bg-[#f0f2f5] rounded-lg px-3 py-2 flex-1 flex items-center gap-2 border border-[#e9edef]">
                         <textarea

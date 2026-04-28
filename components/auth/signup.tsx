@@ -27,6 +27,7 @@ import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
 import { useUserStore } from "@/lib/providers/user-store-provider";
+import { clearLocalDb } from "@/lib/indexdb";
 import { useShallow } from "zustand/react/shallow";
 
 const en = enLabels as Record<Country, string>;
@@ -79,7 +80,14 @@ const Signup = ({ login }: { login: () => void }) => {
 
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Wipe any stale data left in IndexedDB from a previous session before
+      // the new user starts syncing from the server.
+      try {
+        await clearLocalDb();
+      } catch (err) {
+        console.error("Failed to clear local DB on signup", err);
+      }
       toast.success("Account created successfully with Passkey!");
       setAuth(data.access);
       setUser(data.user)
@@ -179,7 +187,12 @@ const Signup = ({ login }: { login: () => void }) => {
 
   useEffect(() => {
     axiosInstance
-      .get("https://ipapi.co/json/")
+      .get("https://ipapi.co/json/", {
+        headers: {
+          'User-Agent': 'nodejs-ipapi-v1.02'
+        },
+        withCredentials: false
+      })
       .then((res) => {
         if (res.data.country_code) {
           setCountry(res.data.country_code as Country);

@@ -231,7 +231,7 @@ function VoiceMessageComp({
 
   return (
     <div className={cn(
-      "flex min-w-[280px] max-w-[340px] items-center gap-2 pt-1 pb-3", !isMine ? "flex-row-reverse" : ""
+      "flex min-w-[280px] max-w-[340px] items-center gap-2 pt-1", !isMine ? "flex-row-reverse" : ""
     )}>
       {/* Hidden Audio Element */}
       {audioUrl && isReady && (
@@ -268,7 +268,7 @@ function VoiceMessageComp({
         />
       )}
       {/* Play/Pause Button with Avatar */}
-      <div className="absolute right-4 top-2 shrink-0">
+      <div className="absolute right-4 bottom-6.5 shrink-0">
         <Avatar className="h-[36px] w-[36px] border-none">
           {senderAvatar && <AvatarImage src={senderAvatar} alt={senderName || ""} className="object-center" />}
           <AvatarFallback className="bg-[#dfe5e7] text-[#54656f] text-lg font-medium">
@@ -289,7 +289,7 @@ function VoiceMessageComp({
       </div>
 
       {/* Content Area */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex flex-1 flex-col min-w-0 px-3">
         {/* Play Button + Waveform Row */}
         <div className="flex items-center gap-2">
           {/* Play/Pause */}

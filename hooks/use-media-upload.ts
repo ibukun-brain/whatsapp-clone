@@ -262,14 +262,26 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
     const isVoice = context.mediaTypeOverride === 'voice_recording';
     const initialMediaFiles = mediaFilesWithOriginals.map(m => m.mediaFile)
 
+    let replyObj = null;
+    if (context.reply_to) {
+      const replyTable = context.chat_type === 'directmessage' ? db.directmessagechats : db.groupmessagechats;
+      replyObj = await replyTable.get(context.reply_to);
+      if (replyObj && context.highlightedFile) {
+        replyObj.highlightedFile = context.highlightedFile;
+      }
+    }
+
     // 2. Create ONE message for all files
     if (context.chat_type === 'directmessage') {
       await db.directmessagechats.put({
         id: dbId,
         direct_message_id: context.context_id,
         client_msg_id: clientMsgId, // Corrected variable name
-        user: currentUser.id,
-        reply: null,
+        user: {
+          id: currentUser.id,
+          color_code: currentUser.color_code
+        },
+        reply: replyObj,
         content: '',
         type: isVoice ? 'voice_recording' : 'media',
         depth: null,
@@ -284,7 +296,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         voice_message_duration: isVoice ? initialMediaFiles[0].duration : undefined,
         voice_message_blob: isVoice ? initialMediaFiles[0].file_blob : undefined,
         voice_message_file_id: isVoice ? initialMediaFiles[0].file_id : undefined,
-      })
+      } as DirectMessageChats)
     } else {
       await db.groupmessagechats.put({
         id: dbId,
@@ -293,7 +305,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
           ...currentUser,
         },
         type: isVoice ? 'voice_recording' : 'media',
-        reply: null,
+        reply: replyObj,
         content: '',
         depth: null,
         forwarded: false,
@@ -309,7 +321,7 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
         voice_message_duration: isVoice ? initialMediaFiles[0].duration : undefined,
         voice_message_blob: isVoice ? initialMediaFiles[0].file_blob : undefined,
         voice_message_file_id: isVoice ? initialMediaFiles[0].file_id : undefined,
-      })
+      } as GroupMessageChats)
     }
 
     // 3. Start all uploads concurrently (don't await so UI is responsive)
@@ -462,7 +474,8 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
             chat_type: chatType,
             context_id: chatType === 'directmessage' ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id,
             client_msg_id: msg.client_msg_id,
-            duration: msg.voice_message_duration
+            duration: msg.voice_message_duration,
+            reply_to: msg.reply?.id
           },
           signal: controller.signal,
           onProgress: async () => {
@@ -535,7 +548,9 @@ export function useMediaUpload(chatId?: string, options: { listen?: boolean } = 
       context_id: chatType === 'directmessage' ? (msg as DirectMessageChats).direct_message_id : (msg as GroupMessageChats).groupchat_id,
       client_msg_id: clientMsgId,
       client_file_id: file.client_file_id,
-      caption: file.caption
+      caption: file.caption,
+      reply_to: msg.reply?.id,
+      highlightedFile: msg.reply?.highlightedFile
     }
 
     console.log('Retrying upload with blob:', file.file_blob)

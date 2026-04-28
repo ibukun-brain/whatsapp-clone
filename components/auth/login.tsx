@@ -26,6 +26,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/lib/providers/auth-store-provider";
 import { useUserStore } from "@/lib/providers/user-store-provider";
 import { useShallow } from "zustand/react/shallow";
+import { clearLocalDb } from "@/lib/indexdb";
 
 
 const en = enLabels as Record<Country, string>;
@@ -77,8 +78,15 @@ const Login = ({ signup }: { signup: () => void }) => {
 
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       console.log("Login: onSuccess", data);
+      // Wipe any stale data left in IndexedDB from a previous session before
+      // the new user starts syncing from the server.
+      try {
+        await clearLocalDb();
+      } catch (err) {
+        console.error("Failed to clear local DB on login", err);
+      }
       toast.success("Account created successfully with Passkey!");
       setAuth(data.access);
       setUser(data.user);
@@ -185,7 +193,12 @@ const Login = ({ signup }: { signup: () => void }) => {
   const { data: ipData } = useQuery({
     queryKey: ["ipLocation"],
     queryFn: async () => {
-      const { data } = await axiosInstance.get("https://ipapi.co/json/");
+      const { data } = await axiosInstance.get("https://ipapi.co/json/", {
+        headers: {
+          'User-Agent': 'nodejs-ipapi-v1.02'
+        },
+        withCredentials: false
+      });
       return data;
     },
     staleTime: Infinity,

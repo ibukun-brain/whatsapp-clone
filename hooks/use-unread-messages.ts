@@ -88,7 +88,7 @@ export function useUnreadMessages({
 
         if (chatType === "directmessage" && dmMessages !== undefined) {
             const unread = dmMessages.filter(
-                (msg) => msg.user !== currentUserId && !msg.read_date
+                (msg) => msg.user.id !== currentUserId && !msg.read_date
             );
             firstUnreadId = unread.length > 0 ? unread[0].id : null;
             unreadCount = unread.length;

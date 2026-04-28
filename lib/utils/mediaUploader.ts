@@ -30,6 +30,7 @@ export async function uploadMedia(options: UploaderOptions) {
 
   const mediaType = overrideMediaType || getMediaType(mimeType)
 
+
   try {
     if (typeof file.size === 'undefined') {
       throw new Error('CORRUPT_FILE: File size is missing. This happens when the file_blob is not a valid Blob instance.')
@@ -37,6 +38,7 @@ export async function uploadMedia(options: UploaderOptions) {
 
     if (file.size <= CHUNK_THRESHOLD) {
       // Single POST upload
+
       const formData = new FormData()
       console.log('Single upload file:', file, 'size:', file.size, 'type:', file.type)
       formData.append('file', file, fileName)
@@ -49,8 +51,12 @@ export async function uploadMedia(options: UploaderOptions) {
       if (context.caption) formData.append('caption', context.caption)
       if (context.client_file_id) formData.append('client_file_id', context.client_file_id)
       if (context.duration != null) formData.append('duration', String(context.duration))
+      if (context.reply_to) formData.append('reply_to', context.reply_to)
 
       if (context.client_msg_id) formData.append('client_msg_id', context.client_msg_id)
+      if (context.mentions && context.mentions.length > 0) {
+        formData.append('mentions', JSON.stringify(context.mentions))
+      }
       if (context.chat_type === 'directmessage') {
         formData.append('direct_message_id', context.context_id)
       } else {
@@ -73,21 +79,37 @@ export async function uploadMedia(options: UploaderOptions) {
       // Chunked upload
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
 
+
       // 1. Initiate
-      const initiateResponse = await axiosInstance.post('media/upload/initiate/', {
-        filename: fileName,
-        mime_type: mimeType,
-        media_type: mediaType,
-        total_size: file.size,
-        total_chunks: totalChunks,
-        blurhash,
-        aspect_ratio,
-        caption: context.caption,
-        client_msg_id: context.client_msg_id,
-        client_file_id: context.client_file_id,
-        duration: context.duration,
-        [context.chat_type === 'directmessage' ? 'direct_message_id' : 'chatgroup_id']: context.context_id
-      }, { signal })
+      const initiateData = new FormData()
+      initiateData.append('filename', fileName)
+      initiateData.append('mime_type', mimeType)
+      initiateData.append('media_type', mediaType)
+      initiateData.append('total_size', String(file.size))
+      initiateData.append('total_chunks', String(totalChunks))
+      if (blurhash) initiateData.append('blurhash', blurhash)
+      if (aspect_ratio) initiateData.append('aspect_ratio', String(aspect_ratio))
+      if (context.caption) initiateData.append('caption', context.caption)
+      if (context.client_msg_id) initiateData.append('client_msg_id', context.client_msg_id)
+      if (context.client_file_id) initiateData.append('client_file_id', context.client_file_id)
+      if (context.duration != null) initiateData.append('duration', String(context.duration))
+      if (context.reply_to) initiateData.append('reply_to', context.reply_to)
+      if (context.mentions && context.mentions.length > 0) {
+        initiateData.append('mentions', JSON.stringify(context.mentions))
+      }
+
+      if (context.chat_type === 'directmessage') {
+        initiateData.append('direct_message_id', context.context_id)
+      } else {
+        initiateData.append('chatgroup_id', context.context_id)
+      }
+
+      const initiateResponse = await axiosInstance.post('media/upload/initiate/', initiateData, {
+        signal,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
 
       const uploadId = initiateResponse.data.upload_id
 

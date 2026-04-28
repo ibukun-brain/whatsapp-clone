@@ -1,4 +1,5 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
+import Image from "next/image";
 import { CheckIcon1, CheckIcon2 } from "@/components/icons/chats-icon";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDateTimeByTimezone, cn } from "@/lib/utils";
@@ -33,15 +34,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Clock, AlertCircle, Smile, Check } from "lucide-react";
+import { Clock, AlertCircle, Smile, Check, Image as ImageIcon, Mic, Play } from "lucide-react";
 import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import {
+    renderContentWithMentions,
+    renderEditorContent,
+    getEditorText,
+    getCursorOffset,
+    setCursorOffset,
+    reconcileMentions,
+} from "@/lib/utils/mentions";
+import type { ComposerMention } from "@/types/mentions";
 
 const ReadReceipt = ({
     read_date,
@@ -132,7 +140,7 @@ const MessageBubble = ({
     onMediaViewerDeleteRequest?: (msgId: string, files: MediaFile[], type: 'for_me' | 'for_everyone') => void,
     peerAvatar?: string | null,
     peerName?: string | null,
-    onEditMessage?: (msgId: string, content: string) => void,
+    onEditMessage?: (msgId: string, content: string, mentions?: ComposerMention[]) => void,
     onReplyMessage?: (msg: DirectMessageChats | GroupMessageChats) => void,
     onScrollToMessage?: (msgId: string) => void,
 }) => {
@@ -220,7 +228,7 @@ const MessageBubble = ({
                         onEnterSelectionMode={handleEnterSelectionMode}
                         handleCopy={handleCopy}
                         senderName={senderName}
-                        onEdit={(content) => onEditMessage?.(msg.id, content)}
+                        onEdit={(content, mentions) => onEditMessage?.(msg.id, content, mentions)}
                         onReply={() => onReplyMessage?.(msg)}
                     >
                         <div className={cn(
@@ -300,18 +308,18 @@ const MessageBubble = ({
                     onEdit={(content) => onEditMessage?.(msg.id, content)}
                     onReply={() => onReplyMessage?.(msg)}
                 >
-                    <div 
+                    <div
                         id={`msg-${msg.id}`}
                         data-grouped-ids={(msg as any).groupedIds?.join(',')}
                         className={cn(
-                        "relative max-w-[400px] shadow-sm cursor-default group",
-                        bubbleClass,
-                        msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-1 py-1.5"
-                    )}>
+                            "relative max-w-[400px] shadow-sm cursor-default group",
+                            bubbleClass,
+                            msg.files && msg.files.length > 0 && !msg.content ? "px-1 py-1" : "px-1 py-1.5"
+                        )}>
                         {deletedBubbleContent || (
                             <div className="flex flex-col">
                                 {!isDM && !isMine && !isConsecutive && (
-                                    <div className="flex justify-between gap-2 mb-0.5">
+                                    <div className="flex justify-between gap-2 mb-0.5 px-1">
                                         {(msg as GroupMessageChats).user.contact_id ? (
                                             <span className={"text-xs capitalize"} style={{
                                                 color: (msg as GroupMessageChats).user.color_code
@@ -327,7 +335,7 @@ const MessageBubble = ({
                                                 </span>
                                             </div>
                                         )}
-                                        {!(msg as GroupMessageChats).user.contact_id && (<span className={cn("text-[11px] text-muted-foreground", msg.voice_message && "absolute right-19.5")}>
+                                        {!(msg as GroupMessageChats).user.contact_id && (<span className={cn("text-[11px] text-muted-foreground", msg.voice_message && "absolute right-15")}>
                                             {(msg as GroupMessageChats).user.phone}
                                         </span>)}
                                     </div>
@@ -337,31 +345,66 @@ const MessageBubble = ({
                                     <div
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            onScrollToMessage?.((msg.reply as any).id);
+                                            onScrollToMessage?.((msg as any).reply.id);
                                         }}
-                                        className="flex flex-col bg-black/5 rounded-lg pl-2.5 pr-2 py-1.5 relative overflow-hidden mb-1 border-l-4 mt-0.5 cursor-pointer"
+                                        className="flex flex-row bg-black/5 rounded-lg pl-2.5 pr-1 py-1.5 relative overflow-hidden mb-1 border-l-4 mt-0.5 cursor-pointer items-center justify-between"
                                         style={{ borderColor: (msg as any).reply.user?.color_code ? `color-mix(in srgb, ${(msg as any).reply.user.color_code} 75%, black)` : '#043b9e' }}
                                     >
-                                        <span
-                                            className="text-[12.5px] font-medium truncate capitalize mb-0.5"
-                                            style={{ color: (msg as any).reply.user?.color_code || '#0852dd' }}
-                                        >
-                                            {(msg as any).reply.user?.id === currentUser?.id ? "You" :
-                                                (isDM ? peerName : (
-                                                    <>
-                                                        {(msg as any).reply.user?.contact_id ? (msg as any).reply.user?.contact_name : (msg as any).reply.user?.display_name}
-                                                        {!(msg as any).reply.user?.contact_id && (
-                                                            <span className="text-muted-foreground ml-1">
-                                                                {(msg as any).reply.user?.phone}
-                                                            </span>
-                                                        )}
-                                                    </>
-                                                ))
-                                            }
-                                        </span>
-                                        <span className="text-[13px] text-[#667781] line-clamp-3 overflow-hidden text-ellipsis wrap-break-words [word-break:break-word]">
-                                            {(msg as any).reply.content || ((msg as any).reply.files?.length ? "Photo" : ((msg as any).reply.voice_message ? "Voice message" : "Message"))}
-                                        </span>
+                                        <div className="flex flex-col flex-1 min-w-0 pr-1">
+                                            <span
+                                                className="text-xs font-medium truncate capitalize mb-0.5"
+                                                style={{ color: (msg as any).reply.user?.color_code || '#0852dd' }}
+                                            >
+                                                {(msg as any).reply.user?.id === currentUser?.id ? "You" :
+                                                    (isDM ? peerName : (
+                                                        <>
+                                                            {(msg as any).reply.user?.contact_id ? (msg as any).reply.user?.contact_name : (msg as any).reply.user?.display_name}
+                                                            {!(msg as any).reply.user?.contact_id && (
+                                                                <span className="text-muted-foreground ml-1">
+                                                                    {(msg as any).reply.user?.contact_name}
+                                                                </span>
+                                                            )}
+                                                        </>
+                                                    ))
+                                                }
+                                            </span>
+                                            <span className="text-[13px] text-[#667781] line-clamp-2 overflow-hidden text-ellipsis wrap-break-words [word-break:break-word]">
+                                                {(msg.reply as any).content ? renderContentWithMentions((msg.reply as any).content, (msg.reply as any).mentions) : (
+                                                    (msg.reply as any).files && (msg.reply as any).files.length > 0 ? (
+                                                        <span className="flex items-center gap-1">
+                                                            <ImageIcon size={14} />
+                                                            {(msg.reply as any).highlightedFile
+                                                                ? ((msg.reply as any).highlightedFile.caption || "photo")
+                                                                : ((msg.reply as any).files.find((f: any) => f.caption)?.caption || ((msg.reply as any).files.length > 1 ? `${(msg.reply as any).files.length} photos` : "photo"))
+                                                            }
+                                                        </span>
+                                                    ) : (msg.reply as any).voice_message ? (
+                                                        <span className="flex items-center gap-1">
+                                                            <Mic size={14} className="text-[#00a884]" />
+                                                            Voice message ({(msg.reply as any).voice_message_duration})
+                                                        </span>
+                                                    ) : "Message"
+                                                )}
+                                            </span>
+                                        </div>
+
+                                        {(msg.reply as any).highlightedFile && ((msg.reply as any).highlightedFile.media_url || (msg.reply as any).highlightedFile.thumbnail_url || (msg.reply as any).highlightedFile.preview_url) && (
+                                            <div className="w-[44px] h-[44px] shrink-0 rounded-md overflow-hidden bg-black/5 ml-1.5 relative">
+                                                <Image
+                                                    src={(msg.reply as any).highlightedFile.media_url || (msg.reply as any).highlightedFile.thumbnail_url || (msg.reply as any).highlightedFile.preview_url || ''}
+                                                    alt=""
+                                                    width={44}
+                                                    height={44}
+                                                    className="w-full h-full object-cover"
+                                                    unoptimized={true}
+                                                />
+                                                {(msg.reply as any).highlightedFile.type === 'video' && (
+                                                    <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                                                        <Play size={10} className="text-white fill-white" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -389,6 +432,7 @@ const MessageBubble = ({
                                             selectedIds={selectedIds}
                                             onToggleSelect={onToggleSelect}
                                             msgId={msg.id}
+                                            onReply={(file) => onReplyMessage?.({ ...msg, highlightedFile: file } as (DirectMessageChats | GroupMessageChats))}
                                         />
                                     </div>
                                 )}
@@ -418,7 +462,7 @@ const MessageBubble = ({
 
                                 {msg.content && (
                                     <div className={`text-[14.5px] ${textColor} leading-normal whitespace-pre-wrap wrap-break-words [word-break:break-word] relative`}>
-                                        {msg.content}
+                                        {renderContentWithMentions(msg.content, msg.mentions)}
                                         <span className={cn("inline-block h-1", msg.edited ? "w-[110px]" : "w-[72px]")} />
                                         <span className="absolute right-0 bottom-0 inline-flex items-center gap-1 h-4 translate-y-0.5">
                                             {(msg as any).receipt === 'failed' && (
@@ -551,20 +595,74 @@ const MessageContextMenu = ({
     onEnterSelectionMode?: (id: string) => void,
     handleCopy: () => void,
     senderName: string | null | undefined,
-    onEdit?: (content: string) => void,
+    onEdit?: (content: string, mentions?: ComposerMention[]) => void,
     onReply?: () => void
 }) => {
     const reactionItems = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
     const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
-    const [editedText, setEditedText] = React.useState(msg.content || "");
+    const [hasEditText, setHasEditText] = React.useState(!!msg.content);
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+
+    const editorRef = React.useRef<HTMLDivElement | null>(null);
+    const editMentionsRef = React.useRef<ComposerMention[]>([]);
 
     const msgDate = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
     const isEditable = isMine && msgDate > 0 && (Date.now() - msgDate <= 5 * 60 * 1000);
 
+    // Callback ref: seed the editor the moment Radix mounts it, since a
+    // useEffect on isEditDialogOpen can fire before the portal attaches.
+    const initEditor = React.useCallback((el: HTMLDivElement | null) => {
+        editorRef.current = el;
+        if (!el) return;
+        const content = msg.content || "";
+        const seed: ComposerMention[] = (msg.mentions || []).map((m) => ({
+            mention_type: m.mention_type,
+            member: m.member ? { id: m.member.id, user_id: m.member.user_id } : null,
+            name: m.name,
+            offset: m.offset,
+            length: m.length,
+        }));
+        editMentionsRef.current = seed;
+        renderEditorContent(el, content, seed);
+        setCursorOffset(el, content.length);
+        setHasEditText(content.length > 0);
+        el.focus();
+    }, [msg.content, msg.mentions]);
+
+    const handleEditInput = () => {
+        const el = editorRef.current;
+        if (!el) return;
+        const text = getEditorText(el);
+        const cursor = getCursorOffset(el);
+        editMentionsRef.current = reconcileMentions(text, editMentionsRef.current);
+        renderEditorContent(el, text, editMentionsRef.current);
+        setCursorOffset(el, cursor);
+        setHasEditText(text.length > 0);
+    };
+
+    const handleEditPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const text = e.clipboardData.getData("text/plain");
+        const sel = window.getSelection();
+        if (!sel?.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        handleEditInput();
+    };
+
     const handleUpdate = () => {
-        if (editedText.trim() === "") return;
-        onEdit?.(editedText);
+        const el = editorRef.current;
+        if (!el) return;
+        const text = getEditorText(el).trim();
+        if (text === "") return;
+        // editMentionsRef already holds ComposerMention[] (with mention_type), pass through.
+        onEdit?.(text, editMentionsRef.current.slice());
         setIsEditDialogOpen(false);
     };
 
@@ -644,10 +742,7 @@ const MessageContextMenu = ({
 
                                 {isEditable && (
                                     <ContextMenuItem
-                                        onSelect={() => {
-                                            setEditedText(msg.content || "");
-                                            setIsEditDialogOpen(true);
-                                        }}
+                                        onSelect={() => setIsEditDialogOpen(true)}
                                         className="flex items-center gap-3 px-3 py-2 text-[15px] text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors focus:bg-gray-50 outline-none"
                                     >
                                         <Pen size={18} className="text-gray-400" />
@@ -708,7 +803,7 @@ const MessageContextMenu = ({
                             "relative shadow-sm px-1 py-1.5 rounded-lg max-w-[250px] bg-[#d9fdd3]"
                         )}>
                             <div className="text-[14.5px] text-[#111b21] leading-normal whitespace-pre-wrap wrap-break-words [word-break:break-word] relative">
-                                {msg.content}
+                                {renderContentWithMentions(msg.content, msg.mentions)}
                                 <span className={cn("inline-block h-1", msg.edited ? "w-[110px]" : "w-[72px]")} />
                                 <span className="absolute right-0 bottom-0 inline-flex items-center gap-0.5 h-4 translate-y-0.5">
                                     <span className="text-[11px] text-[#667781] leading-none">{msg.edited && <span className="mr-1">Edited</span>}{timestamp}</span>
@@ -720,19 +815,29 @@ const MessageContextMenu = ({
 
                     <div className="p-4 bg-white flex items-center gap-3">
                         <div className="flex-1 relative flex items-center">
-                            <Textarea
-                                value={editedText}
-                                onChange={(e) => setEditedText(e.target.value)}
-                                className="w-full min-h-[24px] max-h-[150px] resize-none border-none py-3 selection-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[16px] pl-0 pr-12 placeholder-[#8696a0] selection:bg-[#00a884] selection:text-dark scrollbar-hide"
-                                placeholder="Edit message"
-                                autoFocus
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleUpdate();
-                                    }
-                                }}
-                            />
+                            <div className="flex-1 relative">
+                                {!hasEditText && (
+                                    <span className="absolute left-0 top-3 text-[16px] text-[#8696a0] pointer-events-none select-none">
+                                        Edit message
+                                    </span>
+                                )}
+                                <div
+                                    ref={initEditor}
+                                    contentEditable
+                                    suppressContentEditableWarning
+                                    role="textbox"
+                                    aria-multiline="true"
+                                    className="w-full min-h-[24px] max-h-[150px] overflow-y-auto whitespace-pre-wrap break-words border-none py-3 outline-none text-[16px] text-[#111b21] pl-0 pr-12 leading-normal scrollbar-hide selection:bg-[#00a884] selection:text-dark"
+                                    onInput={handleEditInput}
+                                    onPaste={handleEditPaste}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleUpdate();
+                                        }
+                                    }}
+                                />
+                            </div>
                             <div className="absolute right-12 flex items-center gap-2">
                                 <button className="text-[#8696a0] hover:text-[#54656f] transition-colors">
                                     <Smile size={24} />

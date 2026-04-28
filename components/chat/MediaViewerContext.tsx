@@ -6,7 +6,7 @@ import { MediaFile } from '@/types/mediaTypes'
 import MediaViewer from './MediaViewer'
 
 interface MediaViewerContextType {
-  openViewer: (files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string) => void
+  openViewer: (files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string, onReply?: (file: MediaFile) => void) => void
   closeViewer: () => void
 }
 
@@ -20,17 +20,19 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
     onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void
     canDeleteForEveryone?: boolean
     currentUserId?: string
+    onReply?: (file: MediaFile) => void
   }>({
     isOpen: false,
     files: [],
     initialIndex: 0,
     onDeleteRequest: undefined,
     canDeleteForEveryone: false,
-    currentUserId: undefined
+    currentUserId: undefined,
+    onReply: undefined
   })
 
-  const openViewer = useCallback((files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string) => {
-    setViewerState({ isOpen: true, files, initialIndex, onDeleteRequest, canDeleteForEveryone, currentUserId })
+  const openViewer = useCallback((files: MediaFile[], initialIndex: number, onDeleteRequest?: (files: MediaFile[], type: 'for_me' | 'for_everyone') => void, canDeleteForEveryone?: boolean, currentUserId?: string, onReply?: (file: MediaFile) => void) => {
+    setViewerState({ isOpen: true, files, initialIndex, onDeleteRequest, canDeleteForEveryone, currentUserId, onReply })
   }, [])
 
   const closeViewer = useCallback(() => {
@@ -48,6 +50,7 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
           onDeleteRequest={viewerState.onDeleteRequest}
           canDeleteForEveryone={viewerState.canDeleteForEveryone}
           currentUserId={viewerState.currentUserId}
+          onReply={viewerState.onReply}
         />,
         document.body
       )}

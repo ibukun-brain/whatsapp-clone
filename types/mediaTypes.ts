@@ -57,4 +57,7 @@ export interface UploadContext {
   forceDocument?: boolean
   mediaTypeOverride?: string   // e.g. 'voice_recording'
   duration?: string            // duration as HH:MM:SS
+  reply_to?: string            // message ID being replied to
+  highlightedFile?: MediaFile  // optional specific file being replied to
+  mentions?: import("./mentions").MentionInput[]
 }

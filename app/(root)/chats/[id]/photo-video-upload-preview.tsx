@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import {
     X, Plus, Send, Download, Play, Smile, Clock, History,
     Crop, Sparkles, Pencil, Square, Grid3X3, StickyNote
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getDateTimeByTimezone } from "@/lib/utils";
 import { EmojiIcon } from "@/components/icons/chats-icon";
 
 interface PhotoVideoUploadPreviewProps {
@@ -167,6 +168,7 @@ const PhotoVideoUploadPreview = ({
             <div className={cn(
                 "w-full flex flex-col gap-3 p-4 pb-8 z-50 bg-white"
             )}>
+
                 {/* Caption Input + Send (Unified with FileUploadPreview) */}
                 <div className="max-w-3xl mx-auto w-full flex items-center gap-3">
                     <div className="bg-white rounded-lg px-3 py-2 flex-1 flex items-center gap-2 shadow-sm border border-[#e9edef]">

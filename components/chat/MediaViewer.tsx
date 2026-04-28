@@ -17,10 +17,12 @@ import {
   ZoomOut,
   Star,
   Forward,
+  Reply,
   Play,
   Pause,
   Headphones,
   Trash2,
+  Image as ImageIcon
 } from 'lucide-react'
 import Image from 'next/image'
 import {
@@ -47,6 +49,8 @@ export interface MediaViewerProps {
   canDeleteForEveryone?: boolean
   /** Current user ID for filtering 'deleted for me' */
   currentUserId?: string
+  /** Called when reply is clicked */
+  onReply?: (file: MediaFile) => void
 }
 
 function useFileUrl(file: MediaFile | undefined) {
@@ -184,13 +188,14 @@ function ViewerAudioPlayer({ file }: { file: MediaFile }) {
 }
 
 // ─── Main Viewer ──────────────────────────────────────────────────────
-function MediaViewerComponent({ 
-  files: initialViewableFiles, 
-  initialIndex = 0, 
-  onClose, 
+function MediaViewerComponent({
+  files: initialViewableFiles,
+  initialIndex = 0,
+  onClose,
   onDeleteRequest,
   canDeleteForEveryone = false,
-  currentUserId
+  currentUserId,
+  onReply
 }: MediaViewerProps) {
   const filteredViewableFiles = initialViewableFiles.filter(f => {
     if (!f.deleted) return true;
@@ -343,15 +348,20 @@ function MediaViewerComponent({
       style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }}
     >
       {/* ── Top Bar ───────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between h-[56px] px-4 shrink-0">
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className="flex items-center justify-center w-10 h-10 rounded-full text-[#54656f] dark:text-white/80 hover:text-[#111b21] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
-          title="Close (Esc)"
-        >
-          <X size={22} />
-        </button>
+      <div className="flex items-center justify-between h-[64px] px-4 shrink-0 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur-md z-50">
+        <div className="flex items-center">
+          {activeFile && (
+            <div className="flex flex-col ml-2">
+              <span className="text-[15px] font-medium text-[#111b21] dark:text-white/90">
+                {activeFile.filename}
+              </span>
+              <span className="text-[12px] text-[#667781] dark:text-white/60">
+                {new Date(activeFile.timestamp).toLocaleDateString()} at {new Date(activeFile.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          )}
+        </div>
+
 
         {/* Image-only Toolbar */}
         {isImage && (
@@ -417,12 +427,24 @@ function MediaViewerComponent({
         )}
 
         {/* Right side actions */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <button
             className="p-2.5 text-[#54656f] dark:text-white/70 hover:text-[#111b21] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition-colors"
             title="Star"
           >
             <Star size={20} />
+          </button>
+          <button
+            onClick={() => {
+              if (onReply) {
+                onReply(activeFile);
+                onClose();
+              }
+            }}
+            className="p-2.5 text-[#54656f] dark:text-white/70 hover:text-[#111b21] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition-colors"
+            title="Reply"
+          >
+            <Reply size={20} />
           </button>
           <button
             className="p-2.5 text-[#54656f] dark:text-white/70 hover:text-[#111b21] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition-colors"
@@ -447,6 +469,16 @@ function MediaViewerComponent({
               <Trash2 size={20} />
             </button>
           )}
+
+          <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1" />
+
+          <button
+            onClick={onClose}
+            className="flex items-center justify-center w-10 h-10 rounded-full text-[#54656f] dark:text-white/80 hover:text-[#111b21] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
+            title="Close (Esc)"
+          >
+            <X size={22} />
+          </button>
         </div>
       </div>
 
@@ -538,6 +570,17 @@ function MediaViewerComponent({
 
           {isAudio && <ViewerAudioPlayer key={activeFile.file_id} file={activeFile} />}
         </div>
+
+        {/* Caption below image/video */}
+        {activeFile?.caption && (
+          <div className="absolute bottom-8 left-0 right-0 flex justify-center px-4 pointer-events-none z-30">
+            <div className="bg-black/60 dark:bg-black/40 backdrop-blur-md px-6 py-3 rounded-2xl max-w-[80%] pointer-events-auto shadow-2xl border border-white/10">
+              <p className="text-white text-[15px] leading-relaxed text-center font-normal">
+                {activeFile.caption}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Thumbnail Strip ───────────────────────────────────────── */}

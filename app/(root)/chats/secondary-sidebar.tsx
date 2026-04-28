@@ -63,6 +63,36 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FileText, Image as ImageIcon, Video, Mic, Headphones, Ban } from "lucide-react";
 
 import type { Chat, Contact } from "@/types";
+import type { Mention } from "@/types/mentions";
+
+// Render a recent_content preview with mention ranges styled. Mentions whose
+// offset/length fall outside the (possibly-truncated) text are skipped.
+const renderPreviewWithMentions = (
+  text: string,
+  mentions?: Mention[]
+): React.ReactNode => {
+  if (!mentions || mentions.length === 0) return text;
+  const valid = mentions
+    .filter((m) => m.offset >= 0 && m.length > 0 && m.offset + m.length <= text.length)
+    .slice()
+    .sort((a, b) => a.offset - b.offset);
+  if (valid.length === 0) return text;
+
+  const out: React.ReactNode[] = [];
+  let cursor = 0;
+  valid.forEach((m, i) => {
+    if (m.offset < cursor) return;
+    if (m.offset > cursor) out.push(text.slice(cursor, m.offset));
+    out.push(
+      <span key={`mention-${i}-${m.offset}`} className="font-bold text-accent-primary">
+        {text.slice(m.offset, m.offset + m.length)}
+      </span>
+    );
+    cursor = m.offset + m.length;
+  });
+  if (cursor < text.length) out.push(text.slice(cursor));
+  return out;
+};
 
 // ─── Memoized: Recent content preview (files / text / deletion / voice) ────
 type ChatRecentContentProps = {
@@ -80,6 +110,7 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
   const content = obj.recent_content;
   const files = obj.recent_files;
   const type = obj.recent_message_type;
+  const mentions = obj.recent_mentions;
   const isMine = currentUserId === obj.recent_user_id;
   const deleted = obj.recent_deleted;
 
@@ -222,12 +253,18 @@ const ChatRecentContent = React.memo(function ChatRecentContent({
     );
   }
 
+  const previewText: string = !content
+    ? ""
+    : content.length > 30
+      ? `${content.slice(0, 30)}...`
+      : content;
+
   return (
     <span className="flex items-center gap-1 w-full truncate">
       {renderReceipt()}
       {senderPrefix}
       <span className="truncate">
-        {content && content.length > 20 ? `${content.slice(0, 30)}...` : content}
+        {renderPreviewWithMentions(previewText, mentions)}
       </span>
     </span>
   );
@@ -434,8 +471,9 @@ export const SecondarySidebar = () => {
             chat.direct_message.recent_content = dm.content;
             chat.direct_message.recent_files = dm.files;
             chat.direct_message.recent_message_type = dm.type;
+            chat.direct_message.recent_mentions = dm.mentions;
             chat.direct_message.recent_deleted = dm.deleted;
-            chat.direct_message.recent_user_id = dm.user as string;
+            chat.direct_message.recent_user_id = dm.user.id as string;
             chat.direct_message.delivered_date = dm.delivered_date || null;
             chat.direct_message.read_date = dm.read_date || null;
             chat.direct_message.recent_voice_message = dm.voice_message;
@@ -445,6 +483,7 @@ export const SecondarySidebar = () => {
             chat.group_chat.recent_content = gm.content;
             chat.group_chat.recent_files = gm.files;
             chat.group_chat.recent_message_type = gm.type;
+            chat.group_chat.recent_mentions = gm.mentions;
             chat.group_chat.recent_deleted = gm.deleted;
             chat.group_chat.recent_user_id = gm.user.id;
             chat.group_chat.recent_user_display_name = gm.user.contact_name as string,
@@ -458,12 +497,14 @@ export const SecondarySidebar = () => {
             chat.direct_message.recent_content = "";
             chat.direct_message.recent_files = [];
             chat.direct_message.recent_message_type = undefined;
+            chat.direct_message.recent_mentions = undefined;
             // chat.direct_message.recent_deleted = undefined;
             chat.direct_message.recent_voice_message = undefined;
           } else if (chat.group_chat) {
             chat.group_chat.recent_content = "";
             chat.group_chat.recent_files = [];
             chat.group_chat.recent_message_type = undefined;
+            chat.group_chat.recent_mentions = undefined;
             // chat.group_chat.recent_deleted = undefined;
             chat.group_chat.recent_voice_message = undefined;
           }
@@ -480,6 +521,12 @@ export const SecondarySidebar = () => {
   const contacts = useLiveQuery(
     async () => await db.contact.toArray()
   );
+  // Set of `${message_id}::${offset}` keys for mentions the user has already
+  // scrolled past in any chat. Drives @-badge suppression below.
+  const seenMentionKeys = useLiveQuery(async () => {
+    const rows = await db.seenmentions.toArray();
+    return new Set(rows.map((r) => `${r.message_id}::${r.offset}`));
+  }, []) ?? new Set<string>();
   const typingChats = useTypingStore((s) => s.typingChats);
   const recordingChats = useTypingStore((s) => s.recordingChats);
   React.useEffect(() => {
@@ -748,7 +795,7 @@ export const SecondarySidebar = () => {
                   <Link
                     href={`/chats/${chat.direct_message?.id || chat.group_chat?.id}`}
                     key={chat.id}
-                    className="group hover:bg-background-secondary hover:text-sidebar-accent-foreground hover:rounded-lg flex flex-col items-start gap-2 p-3 text-sm leading-tight whitespace-nowrap last:border-b-0"
+                    className="group flex flex-col items-start gap-2 p-3 mx-1 my-0.5 rounded-lg text-sm leading-tight whitespace-nowrap hover:bg-background-secondary hover:text-sidebar-accent-foreground"
                   >
                     <div className="flex w-full gap-3">
                       <div>
@@ -785,15 +832,21 @@ export const SecondarySidebar = () => {
                         <div className="flex justify-end mt-2 space-x-3">
                           {chat?.isPinned && <PinIcon />}
                           {chat?.direct_message && (
-                            <span>
-                              {chat.direct_message.unread_messages > 0 && <Badge className="bg-accent-primary -mr-2">{chat.direct_message.unread_messages}</Badge>}
+                            <span className="flex items-center gap-1">
+                              {chat.direct_message.unread_messages > 0 && <Badge className="w-5 h-5 bg-accent-primary">{chat.direct_message.unread_messages}</Badge>}
                             </span>
 
                           )}
                           {
                             chat?.group_chat && (
-                              <span>
-                                {(chat.group_chat?.unread_messages ?? 0) > 0 && <Badge className="bg-accent-primary -mr-2">{chat.group_chat?.unread_messages}</Badge>}
+                              <span className="flex items-center gap-1">
+                                {(chat.group_chat?.unread_messages ?? 0) > 0 && <Badge className="bg-accent-primary w-5 h-5">{chat.group_chat?.unread_messages}</Badge>}
+                                {(chat.group_chat?.unread_messages ?? 0) > 0 && chat.group_chat?.recent_mentions?.some(m =>
+                                  ((m.mention_type === 'user' && m.member?.user_id === currentUser?.id) || m.mention_type === "all") &&
+                                  !seenMentionKeys.has(`${chat.group_chat?.recent_content_id}::${m.offset}`)
+                                ) && (
+                                  <Badge className="bg-accent-primary w-5 h-5">@</Badge>
+                                )}
                               </span>
                             )}
                           <div className="hidden group-hover:flex">

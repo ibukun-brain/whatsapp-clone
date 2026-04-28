@@ -23,11 +23,12 @@ interface MediaGridProps {
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
   msgId?: string
+  onReply?: (file: MediaFile) => void
 }
 
 
 
-function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [], currentUserId, onViewerDeleteRequest, isSelectionMode, selectedIds, onToggleSelect, msgId }: MediaGridProps) {
+function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, receipt, allVisualMedia = [], currentUserId, onViewerDeleteRequest, isSelectionMode, selectedIds, onToggleSelect, msgId, onReply }: MediaGridProps) {
   const { openViewer } = useMediaViewer()
 
   const filteredFiles = files.filter(f => {
@@ -46,7 +47,7 @@ function MediaGridComponent({ files, isMine, onRetry, onCancel, userTimezone, re
     const idx = mediaToUse.findIndex(f => f.file_id === file.file_id)
 
     if (idx >= 0 && (file.media_url || file.preview_url || file.file_blob)) {
-      openViewer(mediaToUse, idx, onViewerDeleteRequest, isMine, currentUserId)
+      openViewer(mediaToUse, idx, onViewerDeleteRequest, isMine, currentUserId, onReply)
     }
   }, [viewableFiles, allVisualMedia, openViewer, onViewerDeleteRequest])
 

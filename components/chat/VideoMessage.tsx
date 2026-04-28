@@ -37,11 +37,6 @@ function VideoMessageComp({ file, isMine, onRetry, onCancel, timestamp, receipt,
 
   const videoSrc = isReady ? file.media_url : (blobUrl || file.preview_url)
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
 
   return (
     <div

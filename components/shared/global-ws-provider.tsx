@@ -209,7 +209,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                     // 1. Update directmessagechats table
                     await db.transaction('rw', db.directmessagechats, async () => {
                         const messagesToUpdate = await db.directmessagechats
-                            .filter(m => m.direct_message_id === direct_message_id && m.user !== read_by && !m.read_date)
+                            .filter(m => m.direct_message_id === direct_message_id && m.user.id !== read_by && !m.read_date)
                             .toArray();
 
                         for (const message of messagesToUpdate) {
@@ -465,7 +465,7 @@ export function GlobalWsProvider({ children }: { children: React.ReactNode }) {
                             .where('direct_message_id').equals(directMessageId)
                             .and(m => {
                                 const isOptimistic = m.isOptimistic === true;
-                                const isSameUser = m.user === currentUser?.id;
+                                const isSameUser = m.user.id === currentUser?.id;
                                 const isSameClientMsgId = directChatMessage.client_msg_id && m.client_msg_id === directChatMessage.client_msg_id;
                                 const isSameContent = m.content === directChatMessage.content;
                                 return isOptimistic && isSameUser && (isSameClientMsgId || isSameContent);
