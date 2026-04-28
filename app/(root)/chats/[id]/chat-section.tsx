@@ -9,7 +9,7 @@ import {
     AttachmentPlusIcon,
     SendIcon,
 } from "@/components/icons/chats-icon";
-import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Mic, Play, ChevronDown } from "lucide-react";
+import { FileText, Image as ImageIcon, Camera, Headphones, User as UserIcon, BarChart2, Calendar, StickyNote, X, Trash2, Mic, Play, ChevronDown, AtSign } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
@@ -854,12 +854,21 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mentionedTuplesKey, chatId, seenMentionKeys]);
 
-    const hasUnseenMention = React.useMemo(
-        () => mentionedByMessage.some(({ message_id, offsets }) =>
-            offsets.some((o) => !seenMentionKeys.has(`${message_id}::${o}`))
-        ),
-        [mentionedByMessage, seenMentionKeys]
-    );
+    // Flat, chronologically-ordered list of unseen mention tuples. Drives the
+    // standalone "@" button's count badge and click target.
+    const unseenMentions = React.useMemo(() => {
+        const out: { message_id: string; offset: number }[] = [];
+        for (const { message_id, offsets } of mentionedByMessage) {
+            for (const offset of offsets) {
+                if (!seenMentionKeys.has(`${message_id}::${offset}`)) {
+                    out.push({ message_id, offset });
+                }
+            }
+        }
+        return out;
+    }, [mentionedByMessage, seenMentionKeys]);
+
+    const hasUnseenMention = unseenMentions.length > 0;
 
     const handleScrollToMessage = useCallback((msgId: string) => {
         const element = scrollToMessageId(msgId);
@@ -2016,10 +2025,26 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                             <div ref={bottomAnchorRef} className="h-2" />
                         </div>
 
+                        {/* ── Mention jump button (above scroll-to-bottom) ────── */}
+                        {hasUnseenMention && (
+                            <button
+                                type="button"
+                                onClick={() => handleScrollToMessage(unseenMentions[0].message_id)}
+                                aria-label={`Jump to mention (${unseenMentions.length} unseen)`}
+                                className="absolute right-6 bottom-36 z-10 w-10 h-10 rounded-full bg-white shadow-md border border-[#e9edef] flex items-center justify-center hover:bg-[#f5f6f6] transition-all cursor-pointer"
+                            >
+                                <AtSign size={20} className="text-[#54656f]" />
+                                <span
+                                    aria-hidden="true"
+                                    className="absolute -top-1 -left-1 min-w-4.5 h-4.5 px-1 rounded-full bg-accent-primary text-white text-[10px] font-bold flex items-center justify-center shadow-sm leading-none"
+                                >
+                                    {unseenMentions.length}
+                                </span>
+                            </button>
+                        )}
+
                         {/* ── Scroll-to-bottom button ────────────────────────── */}
-                        {/* Stay visible while there are still unseen mention bubbles
-                            so the user can confirm the "@" cue dismisses on intersect. */}
-                        {(showScrollDown || hasUnseenMention) && (
+                        {showScrollDown && (
                             <button
                                 type="button"
                                 onClick={handleScrollDownClick}
@@ -2027,14 +2052,6 @@ const ChatSection = ({ chatId }: { chatId: string }) => {
                                 className="absolute right-6 bottom-24 z-10 w-10 h-10 rounded-full bg-white shadow-md border border-[#e9edef] flex items-center justify-center hover:bg-[#f5f6f6] transition-all cursor-pointer"
                             >
                                 <ChevronDown size={22} className="text-[#54656f]" />
-                                {hasUnseenMention && (
-                                    <span
-                                        aria-label="You were mentioned"
-                                        className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full bg-accent-primary text-white text-[10px] font-bold flex items-center justify-center shadow-sm leading-none"
-                                    >
-                                        @
-                                    </span>
-                                )}
                             </button>
                         )}
 
